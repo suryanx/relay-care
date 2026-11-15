@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.data/
+coverage/
+*.log
+.DS_Store
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+# Tool output
+graphify-out/
+.playwright-mcp/
+test-results/

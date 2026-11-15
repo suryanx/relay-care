@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Provisional tokens — the full design system arrives in a later checkpoint. */
+@theme {
+  --color-canvas: #fbf7f0;
+  --color-surface: #ffffff;
+  --color-ink: #1f2328;
+  --color-muted: #4a5058;
+  --color-line: #d9d2c5;
+  --color-brand: #1d5c4d;
+  --color-brand-ink: #ffffff;
+  --color-danger: #a4161a;
+  --font-sans: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+}
+
+html { font-size: 112.5%; } /* 18px base for readability */
+body { background: var(--color-canvas); color: var(--color-ink); font-family: var(--font-sans); line-height: 1.55; }
+
+:focus-visible { outline: 3px solid #b8860b; outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
