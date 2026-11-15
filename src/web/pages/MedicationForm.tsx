@@ -23,7 +23,7 @@ export default function MedicationForm() {
   const title = medicationId ? "Edit medicine" : "Add a medicine";
   const ready = profile.data && (!medicationId || existing.data);
   return (
-    <Shell title={title} eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} />}>
+    <Shell title={title} eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} role={profile.data?.role} />}>
       <FormError message={profile.error ?? existing.error} />
       {ready ? (
         <MedicationEditor key={existing.data?.id ?? "new"} profileId={profileId} timezone={profile.data!.timezone} existing={existing.data} />

@@ -1,11 +1,14 @@
 import { Link, Navigate } from "react-router";
+import type { FollowUpSummary } from "../../shared/schemas";
 import { Card, Shell } from "../components/ui";
+import { useApi } from "../lib/useApi";
 import { useSession } from "../lib/session";
 
 const roleLabel = { admin: "Family administrator", caregiver: "Caregiver", elder: "Elder" } as const;
 
 export default function Home() {
   const { me } = useSession();
+  const followUps = useApi<FollowUpSummary[]>(me && !me.isElder ? "/follow-ups/summary" : null);
   if (!me) return <Navigate to="/sign-in" replace />;
   if (me.isElder) return <Navigate to="/elder" replace />;
 
@@ -28,6 +31,16 @@ export default function Home() {
                   <span className="block text-muted">
                     {roleLabel[p.role]} · {p.timezone}
                   </span>
+                  {(() => {
+                    const f = followUps.data?.find((x) => x.profileId === p.id);
+                    if (!f) return null;
+                    return (
+                      <span className={`mt-2 block font-bold ${f.open > 0 ? "text-amber-900" : "text-brand"}`}>
+                        {f.open > 0 ? `${f.open} follow-up${f.open === 1 ? "" : "s"} waiting` : "No follow-ups waiting"}
+                        {f.mine > 0 ? ` · ${f.mine} with you` : ""}
+                      </span>
+                    );
+                  })()}
                 </Link>
               </li>
             ))}

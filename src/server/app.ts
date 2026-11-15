@@ -8,6 +8,8 @@ import { HttpError } from "./authz.js";
 import type { Database } from "./db/client.js";
 import { adherenceRoutes } from "./routes/adherence.js";
 import { carePlanRoutes } from "./routes/carePlan.js";
+import { careTeamRoutes } from "./routes/careTeam.js";
+import { incidentRoutes } from "./routes/incidents.js";
 import { notificationRoutes, sweepRoute } from "./routes/notifications.js";
 import { profileRoutes } from "./routes/profiles.js";
 import { previewConfig, type NotifierConfig } from "./services/notifications.js";
@@ -69,6 +71,8 @@ export function createApp({ db, auth, baseURL, trustProxy = false, devMode = fal
   app.use("/api", carePlanRoutes(db, auth));
   app.use("/api", adherenceRoutes(db, auth));
   app.use("/api", notificationRoutes(db, auth, notifierCfg));
+  app.use("/api", careTeamRoutes(db, auth, notifierCfg.appUrl));
+  app.use("/api", incidentRoutes(db, auth));
 
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "NOT_FOUND", "Not found.")));
 

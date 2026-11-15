@@ -444,6 +444,102 @@ export const sweepRuns = pgTable(
   (t) => [index("sweep_runs_profile_started_idx").on(t.profileId, t.startedAt)],
 );
 
+/* ------------------------------------------------------------------ */
+/* Caregiver invitations                                               */
+/* ------------------------------------------------------------------ */
+
+export const INVITATION_STATUSES = ["pending", "accepted", "revoked"] as const;
+export type InvitationStatus = (typeof INVITATION_STATUSES)[number];
+
+/** Single-use, expiring, profile-scoped invitation. Only a SHA-256 hash of the token is stored. */
+export const caregiverInvitations = pgTable(
+  "caregiver_invitations",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    /** The invited person's email (lower-case). Acceptance requires a signed-in account with this email. */
+    email: text("email").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    status: text("status").$type<InvitationStatus>().notNull().default("pending"),
+    invitedBy: text("invited_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedBy: text("accepted_by").references(() => user.id, { onDelete: "set null" }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("caregiver_invitations_profile_idx").on(t.profileId, t.createdAt)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Follow-up incidents                                                 */
+/* ------------------------------------------------------------------ */
+
+export const INCIDENT_SOURCES = ["dose_unconfirmed", "dose_not_taken", "help_request"] as const;
+export type IncidentSource = (typeof INCIDENT_SOURCES)[number];
+export const INCIDENT_STATUSES = ["open", "claimed", "resolved", "cancelled"] as const;
+export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
+export const INCIDENT_RESOLUTIONS = ["taken_confirmed", "not_taken_confirmed", "unable_to_verify", "help_addressed", "reconciled"] as const;
+export type IncidentResolution = (typeof INCIDENT_RESOLUTIONS)[number];
+export const INCIDENT_EVENT_TYPES = ["created", "claimed", "released", "resolved", "cancelled", "reconciled"] as const;
+export type IncidentEventType = (typeof INCIDENT_EVENT_TYPES)[number];
+
+/** Something a person should look into. One incident per source record (dedupe_key). */
+export const incidents = pgTable(
+  "incidents",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    sourceType: text("source_type").$type<IncidentSource>().notNull(),
+    /** doses.id or help_requests.id */
+    sourceId: text("source_id").notNull(),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    priority: text("priority").$type<"high" | "normal">().notNull(),
+    status: text("status").$type<IncidentStatus>().notNull().default("open"),
+    version: integer("version").notNull().default(0),
+    claimedBy: text("claimed_by").references(() => user.id, { onDelete: "set null" }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by").references(() => user.id, { onDelete: "set null" }),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolution: text("resolution").$type<IncidentResolution>(),
+    resolutionNote: text("resolution_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("incidents_profile_status_idx").on(t.profileId, t.status), index("incidents_source_idx").on(t.sourceId)],
+);
+
+/** Append-only incident activity. */
+export const incidentEvents = pgTable(
+  "incident_events",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    incidentId: text("incident_id")
+      .notNull()
+      .references(() => incidents.id, { onDelete: "cascade" }),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    type: text("type").$type<IncidentEventType>().notNull(),
+    actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    note: text("note"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("incident_events_incident_idx").on(t.incidentId, t.recordedAt)],
+);
+
 export const schema = {
   user,
   session,
@@ -461,4 +557,7 @@ export const schema = {
   notifications,
   sweepLocks,
   sweepRuns,
+  caregiverInvitations,
+  incidents,
+  incidentEvents,
 };

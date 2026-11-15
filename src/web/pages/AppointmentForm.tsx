@@ -25,7 +25,7 @@ export default function AppointmentForm() {
       title={appointmentId ? "Edit appointment" : "Add an appointment"}
       eyebrow={profile.data?.fullName}
       wide
-      nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} />}
+      nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} role={profile.data?.role} />}
     >
       <FormError message={profile.error ?? existing.error} />
       {ready ? (

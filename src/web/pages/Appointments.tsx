@@ -32,7 +32,7 @@ export default function Appointments() {
   }
 
   return (
-    <Shell title="Appointments" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} />}>
+    <Shell title="Appointments" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} role={profile.data?.role} />}>
       <FormError message={error ?? list.error} />
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <label className="flex min-h-11 items-center gap-2">

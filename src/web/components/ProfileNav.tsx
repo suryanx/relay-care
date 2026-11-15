@@ -1,17 +1,20 @@
 import { useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router";
 
-const tabs = [
+const tabs: { to: string; label: string; end?: boolean; adminOnly?: boolean }[] = [
   { to: "", label: "Overview", end: true },
+  { to: "follow-ups", label: "Follow-ups" },
   { to: "schedule", label: "Schedule" },
   { to: "medications", label: "Medicines" },
   { to: "routines", label: "Routines" },
   { to: "appointments", label: "Appointments" },
-  { to: "notifications", label: "Notifications" },
+  { to: "team", label: "Care team", adminOnly: true },
+  { to: "notifications", label: "Notifications", adminOnly: true },
 ];
 
 /** Profile-specific navigation shown on every care-team page for one elderly person. */
-export function ProfileNav({ profileId, name }: { profileId: string; name?: string }) {
+/** Tabs for one care profile. Admin-only tabs are hidden for caregivers (the server enforces access regardless). */
+export function ProfileNav({ profileId, name, role }: { profileId: string; name?: string; role?: "admin" | "caregiver" | "elder" }) {
   const navRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
 
@@ -23,7 +26,9 @@ export function ProfileNav({ profileId, name }: { profileId: string; name?: stri
   return (
     <nav ref={navRef} aria-label={name ? `${name}'s care` : "Profile sections"} className="mb-6 -mx-4 overflow-x-auto px-4">
       <ul className="flex min-w-max gap-1 border-b border-line">
-        {tabs.map((t) => (
+        {tabs
+          .filter((t) => !t.adminOnly || role === undefined || role === "admin")
+          .map((t) => (
           <li key={t.label}>
             <NavLink
               to={`/profiles/${profileId}${t.to ? `/${t.to}` : ""}`}
@@ -37,7 +42,7 @@ export function ProfileNav({ profileId, name }: { profileId: string; name?: stri
               {t.label}
             </NavLink>
           </li>
-        ))}
+          ))}
       </ul>
     </nav>
   );

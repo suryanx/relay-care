@@ -35,7 +35,7 @@ export default function Routines() {
   }
 
   return (
-    <Shell title="Daily routines" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} />}>
+    <Shell title="Daily routines" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} role={profile.data?.role} />}>
       <p className="mb-6 text-muted">
         Simple everyday tasks the family has agreed on, like drinking water or a short walk. Routines are not medicines.
       </p>

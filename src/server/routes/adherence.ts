@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { Router, type Request } from "express";
 import { DateTime } from "luxon";
 import {
@@ -16,7 +16,7 @@ import {
 import type { Auth } from "../auth.js";
 import { HttpError, asyncHandler, requireElder, requireMember, requireSession } from "../authz.js";
 import type { Database } from "../db/client.js";
-import { appointments, doseEvents, doses, helpRequests, profiles, user } from "../db/schema.js";
+import { appointments, doseEvents, doses, helpRequests, incidents, profiles, user } from "../db/schema.js";
 import {
   EARLY_WINDOW_MINUTES,
   MAX_SNOOZES,
@@ -28,12 +28,14 @@ import {
   type Actor,
   type DoseRow,
 } from "../services/adherence.js";
+import { syncIncidents } from "../services/incidents.js";
 import { generateDosesForProfile } from "../services/schedule.js";
 
 /** Brings a profile up to date before reading: top up doses, then apply due system transitions. */
 export async function evaluateProfile(db: Database, profileId: string, now: Date = new Date()) {
   await generateDosesForProfile(db, profileId, now);
   await markOverdueUnconfirmed(db, now, profileId);
+  await syncIncidents(db, now, profileId);
 }
 
 async function loadProfile(db: Database, profileId: string) {
@@ -142,6 +144,14 @@ export function adherenceRoutes(db: Database, auth: Auth): Router {
         .select({ id: helpRequests.id })
         .from(helpRequests)
         .where(and(eq(helpRequests.profileId, profileId), eq(helpRequests.status, "open")));
+      const recentHelp = await db
+        .select({ h: helpRequests, claimedBy: incidents.claimedBy, handler: user.name })
+        .from(helpRequests)
+        .leftJoin(incidents, eq(incidents.dedupeKey, sql`'help_request:' || ${helpRequests.id}`))
+        .leftJoin(user, eq(user.id, incidents.claimedBy))
+        .where(and(eq(helpRequests.profileId, profileId), gte(helpRequests.createdAt, new Date(now.getTime() - 24 * 3_600_000))))
+        .orderBy(desc(helpRequests.createdAt))
+        .limit(3);
 
       const body: ElderTodayResponse = {
         preferredName: profile.preferredName,
@@ -160,6 +170,12 @@ export function adherenceRoutes(db: Database, auth: Auth): Router {
           };
         }),
         openHelpRequests: open.length,
+        helpRequests: recentHelp.map(({ h, handler }) => ({
+          id: h.id,
+          status: h.status,
+          handledBy: h.status === "acknowledged" && handler ? handler.split(" ")[0]! : null,
+          createdAt: h.createdAt.toISOString(),
+        })),
       };
       res.json(body);
     }),
@@ -177,6 +193,7 @@ export function adherenceRoutes(db: Database, auth: Auth): Router {
         { type: "record", outcome: input.outcome, source: "self_reported", note: input.note },
         actorOf(req),
       );
+      await syncIncidents(db, new Date(), req.membership!.profileId);
       res.json({ status: dose.status, changed });
     }),
   );
@@ -202,6 +219,7 @@ export function adherenceRoutes(db: Database, auth: Auth): Router {
         { type: "correct", outcome: input.outcome, source: "self_reported", note: input.note },
         actorOf(req),
       );
+      await syncIncidents(db, new Date(), req.membership!.profileId);
       res.json({ status: dose.status, changed });
     }),
   );
@@ -220,7 +238,8 @@ export function adherenceRoutes(db: Database, auth: Auth): Router {
         .insert(helpRequests)
         .values({ profileId, doseId: input.doseId ?? null, requestedBy: req.authCtx!.userId, note: input.note ?? null })
         .returning();
-      // Honest status: the request is saved and visible in Relay. Email notification is Checkpoint 5.
+      await syncIncidents(db, new Date(), profileId); // becomes a follow-up the care team can claim
+      // Honest: saved and visible to the care team in Relay. Email alerts go out only on the next reminder check.
       res.status(201).json({ id: row!.id, status: row!.status, notified: false });
     }),
   );
@@ -309,6 +328,7 @@ export function adherenceRoutes(db: Database, auth: Auth): Router {
         { type: "record", outcome: input.outcome, source: input.source, note: input.note, occurredAt: parseOccurredAt(input.occurredAt) },
         actorOf(req),
       );
+      await syncIncidents(db, new Date(), req.membership!.profileId);
       res.json({ status: dose.status, changed });
     }),
   );
@@ -325,6 +345,7 @@ export function adherenceRoutes(db: Database, auth: Auth): Router {
         { type: "correct", outcome: input.outcome, source: input.source === "self_reported" || !input.source ? "reported_by_other" : input.source, note: input.note },
         actorOf(req),
       );
+      await syncIncidents(db, new Date(), req.membership!.profileId);
       res.json({ status: dose.status, changed });
     }),
   );

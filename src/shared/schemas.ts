@@ -249,6 +249,8 @@ export interface ElderTodayResponse {
   doses: DoseView[];
   appointments: { id: string; doctorName: string; specialty: string | null; localDate: string; localTime: string; location: string | null }[];
   openHelpRequests: number;
+  /** Recent help requests: open = waiting for someone; acknowledged = being handled; resolved. */
+  helpRequests: { id: string; status: "open" | "acknowledged" | "resolved"; handledBy: string | null; createdAt: string }[];
 }
 
 export interface AdherenceCountsView {
@@ -357,4 +359,80 @@ export interface NotificationCenterResponse {
   cooldownSeconds: number;
   lastRun: { startedAt: string; trigger: "scheduler" | "manual"; summary: SweepSummaryView | null } | null;
   items: NotificationItem[];
+}
+
+/* --------------------------- Care team ----------------------------- */
+
+export const createInvitationSchema = z.object({ email: z.email("Enter a valid email address").max(200) });
+export const invitationTokenSchema = z.object({ token: z.string().min(20).max(200) });
+
+export interface InvitationView {
+  id: string;
+  emailMasked: string;
+  state: "pending" | "accepted" | "revoked" | "expired";
+  invitedBy: string;
+  createdAt: string;
+  expiresAt: string;
+  acceptedBy: string | null;
+}
+
+export interface InvitationPreview {
+  state: "invalid" | "pending" | "accepted" | "revoked" | "expired";
+  careRecipient?: string;
+  invitedBy?: string;
+  invitedEmail?: string;
+  invitedEmailMasked?: string;
+}
+
+/* --------------------------- Follow-ups ---------------------------- */
+
+export const incidentResolutionValues = ["taken_confirmed", "not_taken_confirmed", "unable_to_verify", "help_addressed"] as const;
+export const resolveIncidentSchema = z.object({
+  resolution: z.enum(incidentResolutionValues),
+  source: z.enum(["observed", "reported_by_other"]).optional(),
+  note: z.string().trim().max(500).optional().nullable(),
+});
+export const releaseIncidentSchema = z.object({ note: z.string().trim().max(300).optional().nullable() });
+
+export interface IncidentEventView {
+  id: string;
+  type: "created" | "claimed" | "released" | "resolved" | "cancelled" | "reconciled";
+  actor: string;
+  note: string | null;
+  recordedAt: string;
+}
+
+export interface IncidentView {
+  id: string;
+  sourceType: "dose_unconfirmed" | "dose_not_taken" | "help_request";
+  priority: "high" | "normal";
+  reason: string;
+  status: "open" | "claimed" | "resolved" | "cancelled";
+  subject: string;
+  claimedBy: { id: string; name: string } | null;
+  claimedByMe: boolean;
+  claimedAt: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  resolution: string | null;
+  resolutionNote: string | null;
+  createdAt: string;
+  allowedResolutions: string[];
+  canResolve: boolean;
+  canRelease: boolean;
+  events: IncidentEventView[];
+}
+
+export interface IncidentListResponse {
+  role: "admin" | "caregiver";
+  counts: { open: number; claimed: number; mine: number; resolvedToday: number };
+  incidents: IncidentView[];
+}
+
+export interface FollowUpSummary {
+  profileId: string;
+  preferredName: string;
+  role: Role;
+  open: number;
+  mine: number;
 }

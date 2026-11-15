@@ -28,7 +28,7 @@ export default function Schedule() {
   ];
 
   return (
-    <Shell title="Schedule" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} />}>
+    <Shell title="Schedule" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} role={profile.data?.role} />}>
       <FormError message={profile.error ?? sched.error} />
       <div role="group" aria-label="Choose day" className="mb-6 flex flex-wrap gap-2">
         {days.map((d) => (

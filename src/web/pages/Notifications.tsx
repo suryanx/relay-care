@@ -112,7 +112,7 @@ export default function Notifications() {
 
   const data = center.data;
   return (
-    <Shell title="Notifications" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} />}>
+    <Shell title="Notifications" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={profile.data?.preferredName} role={profile.data?.role} />}>
       <FormError message={error ?? (center.error ? `${center.error} Only family administrators can view notification history.` : null)} />
 
       {data && (

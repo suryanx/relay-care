@@ -55,7 +55,7 @@ export default function ProfileView() {
   }
 
   return (
-    <Shell title={profile.fullName} wide nav={<ProfileNav profileId={profile.id} name={profile.preferredName} />}>
+    <Shell title={profile.fullName} wide nav={<ProfileNav profileId={profile.id} name={profile.preferredName} role={profile.role} />}>
       {today.data && today.data.openHelpRequests.length > 0 && (
         <section aria-labelledby="help-heading" className="mb-6 rounded-xl border-2 border-amber-700 bg-amber-50 p-5 text-amber-950">
           <h2 id="help-heading" className="mb-2 text-xl font-bold">

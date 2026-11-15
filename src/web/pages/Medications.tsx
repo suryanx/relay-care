@@ -37,7 +37,7 @@ export default function Medications() {
   }
 
   return (
-    <Shell title="Medicines" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={name} />}>
+    <Shell title="Medicines" eyebrow={profile.data?.fullName} wide nav={<ProfileNav profileId={profileId} name={name} role={profile.data?.role} />}>
       <FormError message={error ?? meds.error} />
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted">Entered by the care team from the prescriber’s instructions. Relay never changes doses.</p>

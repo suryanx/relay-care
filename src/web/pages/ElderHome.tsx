@@ -209,6 +209,8 @@ export default function ElderHome() {
           )}
         </section>
 
+        {data.helpRequests[0] && <HelpStatus help={data.helpRequests[0]} />}
+
         {/* Help — always reachable */}
         <button
           type="button"
@@ -320,5 +322,23 @@ export default function ElderHome() {
         </p>
       </main>
     </div>
+  );
+}
+
+function HelpStatus({ help }: { help: ElderTodayResponse["helpRequests"][number] }) {
+  const text =
+    help.status === "open"
+      ? "Your request for help is waiting for someone in your care team to pick it up."
+      : help.status === "acknowledged"
+        ? `${help.handledBy ?? "Someone in your care team"} is looking into your request.`
+        : "Your care team marked your request for help as sorted out.";
+  return (
+    <section aria-labelledby="help-status-heading" className="mb-4 rounded-2xl border-2 border-line bg-surface p-5">
+      <h2 id="help-status-heading" className="text-xl font-bold">
+        Your request for help
+      </h2>
+      <p className="mt-1 text-xl">{text}</p>
+      <p className="mt-2 text-base text-muted">Relay is not an emergency service. In an emergency, call your local emergency number.</p>
+    </section>
   );
 }

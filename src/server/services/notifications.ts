@@ -6,6 +6,7 @@ import {
   appointments,
   doses,
   helpRequests,
+  incidents,
   medications,
   notifications,
   profileMembers,
@@ -19,6 +20,7 @@ import {
 import { ConsoleEmailProvider } from "../email/console.js";
 import { EmailSendError, type EmailProvider } from "../email/types.js";
 import { markOverdueUnconfirmed } from "./adherence.js";
+import { syncIncidents } from "./incidents.js";
 import { generateDosesForProfile } from "./schedule.js";
 
 /* ------------------------------------------------------------------ */
@@ -89,7 +91,8 @@ type Pref = "notifyDoseReminders" | "notifyAlerts" | "notifyAppointments";
  * Deterministic recipient rules (Checkpoint 4):
  * - Never elder accounts (they have no real email address).
  * - Never placeholder addresses (*.invalid).
- * - Unconfirmed / Not Taken / help alerts → family administrators who keep alerts on.
+ * - Unconfirmed / Not Taken / help alerts → administrators and caregivers who keep alerts on
+ *   (these alerts double as the follow-up notice; no separate incident email is sent).
  * - Dose and appointment reminders → administrators and caregivers who opted in.
  */
 async function recipients(db: Database, profileId: string, pref: Pref, roles: ("admin" | "caregiver")[]) {
@@ -104,10 +107,10 @@ async function recipients(db: Database, profileId: string, pref: Pref, roles: ("
 const PREF_FOR: Record<NotificationType, { pref: Pref; roles: ("admin" | "caregiver")[] }> = {
   dose_reminder: { pref: "notifyDoseReminders", roles: ["admin", "caregiver"] },
   dose_snooze_reminder: { pref: "notifyDoseReminders", roles: ["admin", "caregiver"] },
-  dose_unconfirmed: { pref: "notifyAlerts", roles: ["admin"] },
-  dose_not_taken: { pref: "notifyAlerts", roles: ["admin"] },
+  dose_unconfirmed: { pref: "notifyAlerts", roles: ["admin", "caregiver"] },
+  dose_not_taken: { pref: "notifyAlerts", roles: ["admin", "caregiver"] },
   appointment_reminder: { pref: "notifyAppointments", roles: ["admin", "caregiver"] },
-  help_request: { pref: "notifyAlerts", roles: ["admin"] },
+  help_request: { pref: "notifyAlerts", roles: ["admin", "caregiver"] },
 };
 
 /* ------------------------------------------------------------------ */
@@ -188,6 +191,15 @@ export async function checkRelevance(db: Database, n: NotificationRow, cfg: Noti
   const name = p.preferredName;
   const local = (d: Date) => DateTime.fromJSDate(d, { zone: p.timezone });
 
+  // Alerts that announce a follow-up are pointless once someone is handling it or it is closed.
+  if (n.type === "dose_unconfirmed" || n.type === "dose_not_taken" || n.type === "help_request") {
+    const sourceId = n.doseId ?? n.helpRequestId;
+    if (sourceId) {
+      const [inc] = await db.select({ status: incidents.status }).from(incidents).where(eq(incidents.dedupeKey, `${n.type}:${sourceId}`));
+      if (inc && inc.status !== "open") return { ok: false, status: "cancelled", reason: `incident_${inc.status}` };
+    }
+  }
+
   if (n.doseId) {
     const [d] = await db.select().from(doses).where(and(eq(doses.id, n.doseId), eq(doses.profileId, n.profileId)));
     if (!d) return { ok: false, status: "cancelled", reason: "dose_removed" };
@@ -231,7 +243,7 @@ export async function checkRelevance(db: Database, n: NotificationRow, cfg: Noti
 
   if (n.helpRequestId) {
     const [h] = await db.select().from(helpRequests).where(eq(helpRequests.id, n.helpRequestId));
-    if (!h || h.status !== "open") return { ok: false, status: "cancelled", reason: "help_resolved" };
+    if (!h || h.status === "resolved") return { ok: false, status: "cancelled", reason: "help_resolved" };
     return { ok: true, email: r.email, content: render(n.type, { name, link: `${cfg.appUrl}/profiles/${p.id}` }) };
   }
 
@@ -660,6 +672,7 @@ export async function runSweep(db: Database, cfg: NotifierConfig, opts: SweepOpt
     let dosesGenerated = 0;
     for (const id of profileIds) dosesGenerated += await generateDosesForProfile(db, id, now);
     const markedUnconfirmed = (await markOverdueUnconfirmed(db, now, opts.profileId)).length;
+    await syncIncidents(db, now, opts.profileId);
     const queued = await queueDueNotifications(db, now, opts.profileId);
     const processed = await processQueue(db, cfg, now, opts.profileId);
     const summary: SweepSummary = {

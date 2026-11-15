@@ -2,7 +2,7 @@
   "name": "relay",
   "version": "0.1.0",
   "private": true,
-  "description": "Relay — collaborative, uncertainty-aware elderly care and medication management.",
+  "description": "Relay \u2014 collaborative, uncertainty-aware elderly care and medication management.",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -14,7 +14,8 @@
     "test": "vitest run",
     "lint": "eslint . && tsc --noEmit -p tsconfig.json",
     "db:generate": "drizzle-kit generate",
-    "email:test": "tsx scripts/email-test.ts"
+    "email:test": "tsx scripts/email-test.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.16",
