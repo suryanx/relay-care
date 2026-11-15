@@ -8,7 +8,16 @@ Relay is a shared care platform for an elderly person, their family and their ca
 
 - **Checkpoint 1 (foundation):** sign-in, profiles, roles, an elder device sign-in, the email provider abstraction and tests.
 - **Checkpoint 2 (care plan):** medicines, daily routines, appointments, and deterministic dose generation in the profile's time zone (bounded 24 h back / 48 h ahead, idempotent, DST-safe).
-- **Coming next:** dose confirmation and the unconfirmed vs. missed states, caregiver follow-up, and scheduled email reminders.
+- **Checkpoint 3 (adherence):** an elder dashboard with four actions, a deterministic dose state machine, an append-only event history with provenance, corrections, help requests, and a family adherence view.
+- **Coming next:** scheduled email reminders (Checkpoint 4) and caregiver follow-up and notification (Checkpoint 5).
+
+### Adherence principles
+- States: `scheduled`, `taken`, `not_taken`, `unconfirmed`, `void`. **Silence never becomes "not taken".** Only the system marks a dose `unconfirmed`, and only after the profile's grace period (default 60 min, or later if the dose was snoozed).
+- Every outcome records who recorded it, when, and how they know (`self_reported`, `observed`, `reported_by_other` or `system`). It also stores the claimed time taken separately from the time it was reported.
+- `dose_events` is append-only. Corrections (by an admin, or by whoever recorded the outcome, within 24 h, with a reason) add a linked event; nothing is overwritten or erased.
+- Concurrency: every change is a conditional update on a per-dose `version`, then re-evaluated on conflict. A repeated identical request is a no-op (200). A conflicting one gets 409.
+- "Remind me later": 15 minutes, at most twice per dose. The prescribed time never changes.
+- Relay never advises taking, doubling or skipping a dose.
 
 ### Dose generation rules
 - Every medicine or routine is taken daily at one or more local times (`HH:mm`), between an inclusive start date and an optional end date.

@@ -15,6 +15,13 @@
       "when": 1794721370835,
       "tag": "0001_care_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794722179247,
+      "tag": "0002_adherence",
+      "breakpoints": true
     }
   ]
 }

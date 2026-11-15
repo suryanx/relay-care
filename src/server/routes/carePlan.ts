@@ -15,6 +15,7 @@ import type { Auth } from "../auth.js";
 import { HttpError, asyncHandler, requireMember, requireSession } from "../authz.js";
 import type { Database } from "../db/client.js";
 import { appointments, doses, medications, profiles, routines } from "../db/schema.js";
+import { markOverdueUnconfirmed } from "../services/adherence.js";
 import { generateDosesForProfile, replanSource, resolveLocalTime } from "../services/schedule.js";
 
 /** Care-plan reads and writes are for the care team; elder accounts never reach these routes. */
@@ -264,6 +265,7 @@ export function carePlanRoutes(db: Database, auth: Auth): Router {
       const zone = await profileTimezone(db, profileId);
       const now = new Date();
       await generateDosesForProfile(db, profileId, now); // idempotent top-up of the bounded window
+      await markOverdueUnconfirmed(db, now, profileId);
       const localDate = date ?? DateTime.fromJSDate(now, { zone }).toISODate()!;
       const rows = await db
         .select()

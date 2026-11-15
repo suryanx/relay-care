@@ -186,3 +186,110 @@ export interface ScheduleResponse {
   timezone: string;
   items: ScheduledItem[];
 }
+
+/* ---------------------------- Adherence ---------------------------- */
+
+export const outcomeValues = ["taken", "not_taken"] as const;
+export type OutcomeValue = (typeof outcomeValues)[number];
+const note = z.string().trim().max(500, "Use 500 characters or fewer").optional().nullable();
+
+/** Elder: "I have taken it" / "I did not take it". Source is always self_reported (set by the server). */
+export const elderOutcomeSchema = z.object({ outcome: z.enum(outcomeValues), note });
+
+/** Care team recording on someone's behalf: they must say how they know. */
+export const teamOutcomeSchema = z.object({
+  outcome: z.enum(outcomeValues),
+  source: z.enum(["observed", "reported_by_other"]),
+  note,
+  occurredAt: z.iso.datetime({ offset: true }).optional().nullable(),
+});
+
+export const correctionSchema = z.object({
+  outcome: z.enum(outcomeValues),
+  note: z.string().trim().min(3, "Say briefly why this is being corrected").max(500),
+  source: z.enum(["self_reported", "observed", "reported_by_other"]).optional(),
+});
+
+export const helpRequestSchema = z.object({
+  doseId: z.string().min(1).max(200).optional().nullable(),
+  note: z.string().trim().max(500).optional().nullable(),
+});
+
+export type DoseStatusValue = "scheduled" | "taken" | "not_taken" | "unconfirmed" | "void";
+export type DosePhaseValue = "upcoming" | "due" | "unconfirmed" | "taken" | "not_taken" | "void";
+export type SourceValue = "self_reported" | "observed" | "reported_by_other" | "system";
+
+export interface DoseView {
+  id: string;
+  kind: "medication" | "routine";
+  label: string;
+  detail: string | null;
+  localDate: string;
+  localTime: string;
+  scheduledAt: string;
+  status: DoseStatusValue;
+  phase: DosePhaseValue;
+  snoozeCount: number;
+  snoozeUntil: string | null;
+  canRecord: boolean;
+  canSnooze: boolean;
+  outcome: null | {
+    source: SourceValue | null;
+    recordedBy: string | null;
+    recordedAt: string | null;
+    occurredAt: string | null;
+    note: string | null;
+  };
+}
+
+export interface ElderTodayResponse {
+  preferredName: string;
+  timezone: string;
+  date: string;
+  doses: DoseView[];
+  appointments: { id: string; doctorName: string; specialty: string | null; localDate: string; localTime: string; location: string | null }[];
+  openHelpRequests: number;
+}
+
+export interface AdherenceCountsView {
+  total: number;
+  taken: number;
+  notTaken: number;
+  unconfirmed: number;
+  pending: number;
+}
+
+export interface DoseEventView {
+  id: string;
+  doseId: string;
+  doseLabel?: string;
+  doseLocalTime?: string;
+  type: "outcome" | "correction" | "unconfirmed" | "snooze" | "void";
+  fromStatus: DoseStatusValue;
+  toStatus: DoseStatusValue;
+  source: SourceValue;
+  actor: string;
+  note: string | null;
+  occurredAt: string | null;
+  recordedAt: string;
+  correctionOf: string | null;
+}
+
+export interface HelpRequestView {
+  id: string;
+  doseId: string | null;
+  doseLabel: string | null;
+  note: string | null;
+  status: "open" | "acknowledged" | "resolved";
+  requestedBy: string;
+  createdAt: string;
+}
+
+export interface AdherenceResponse {
+  date: string;
+  timezone: string;
+  counts: AdherenceCountsView;
+  doses: DoseView[];
+  recentActivity: DoseEventView[];
+  openHelpRequests: HelpRequestView[];
+}

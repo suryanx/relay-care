@@ -119,3 +119,23 @@ export const asyncHandler =
   (req, res, next) => {
     fn(req, res).catch(next);
   };
+
+/** Elder-device routes: resolves the ONE profile this elder account belongs to (never from the client). */
+export function requireElder(db: Database): RequestHandler {
+  return async (req: Request, _res: Response, next: NextFunction) => {
+    try {
+      const userId = req.authCtx?.userId;
+      if (!userId) throw new HttpError(401, "UNAUTHENTICATED", "Please sign in.");
+      const [row] = await db
+        .select({ profileId: profileMembers.profileId })
+        .from(profileMembers)
+        .where(and(eq(profileMembers.userId, userId), eq(profileMembers.role, "elder")))
+        .limit(1);
+      if (!row) throw new HttpError(403, "FORBIDDEN", "This page is for elder accounts.");
+      req.membership = { profileId: row.profileId, role: "elder" };
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}

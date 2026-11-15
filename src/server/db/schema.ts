@@ -108,6 +108,8 @@ export const profiles = pgTable("profiles", {
     .notNull()
     .references(() => user.id),
   consentRecordedAt: timestamp("consent_recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Minutes after a dose's time before the system marks it Unconfirmed. */
+  graceMinutes: integer("grace_minutes").notNull().default(60),
   elderUserId: text("elder_user_id")
     .unique()
     .references(() => user.id, { onDelete: "set null" }),
@@ -217,6 +219,10 @@ export const DOSE_KINDS = ["medication", "routine"] as const;
 export type DoseKind = (typeof DOSE_KINDS)[number];
 export const DOSE_STATUSES = ["scheduled", "taken", "not_taken", "unconfirmed", "void"] as const;
 export type DoseStatus = (typeof DOSE_STATUSES)[number];
+export const OUTCOME_SOURCES = ["self_reported", "observed", "reported_by_other", "system"] as const;
+export type OutcomeSource = (typeof OUTCOME_SOURCES)[number];
+export const DOSE_EVENT_TYPES = ["outcome", "correction", "unconfirmed", "snooze", "void"] as const;
+export type DoseEventType = (typeof DOSE_EVENT_TYPES)[number];
 
 /**
  * One planned occurrence of a medication or routine.
@@ -239,13 +245,77 @@ export const doses = pgTable(
     localDate: text("local_date").notNull(),
     localTime: text("local_time").notNull(),
     status: text("status").$type<DoseStatus>().notNull().default("scheduled"),
+    /** Optimistic-concurrency counter; every state change increments it. */
+    version: integer("version").notNull().default(0),
+    // Current outcome (denormalised from dose_events for fast reads).
+    outcomeSource: text("outcome_source").$type<OutcomeSource>(),
+    outcomeRecordedBy: text("outcome_recorded_by").references(() => user.id, { onDelete: "set null" }),
+    outcomeRecordedAt: timestamp("outcome_recorded_at", { withTimezone: true }),
+    /** When the person says the dose was actually taken (may differ from when it was reported). */
+    outcomeOccurredAt: timestamp("outcome_occurred_at", { withTimezone: true }),
+    outcomeNote: text("outcome_note"),
+    // "Remind me later": postpones the next reminder only; scheduledAt never changes.
+    snoozeCount: integer("snooze_count").notNull().default(0),
+    snoozeUntil: timestamp("snooze_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("doses_profile_status_idx").on(t.profileId, t.status),
     index("doses_profile_date_idx").on(t.profileId, t.localDate),
     index("doses_profile_scheduled_idx").on(t.profileId, t.scheduledAt),
   ],
+);
+
+/** Append-only audit trail of every dose state change. Rows are never updated or deleted by the app. */
+export const doseEvents = pgTable(
+  "dose_events",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    doseId: text("dose_id")
+      .notNull()
+      .references(() => doses.id, { onDelete: "cascade" }),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    type: text("type").$type<DoseEventType>().notNull(),
+    fromStatus: text("from_status").$type<DoseStatus>().notNull(),
+    toStatus: text("to_status").$type<DoseStatus>().notNull(),
+    source: text("source").$type<OutcomeSource>().notNull(),
+    /** null only for system events. */
+    actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    note: text("note"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }),
+    correctionOf: text("correction_of"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("dose_events_dose_idx").on(t.doseId), index("dose_events_profile_recorded_idx").on(t.profileId, t.recordedAt)],
+);
+
+export const HELP_STATUSES = ["open", "acknowledged", "resolved"] as const;
+export type HelpStatus = (typeof HELP_STATUSES)[number];
+
+/** "I need help" requests from the elder. Notification/follow-up arrives in Checkpoint 5. */
+export const helpRequests = pgTable(
+  "help_requests",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    doseId: text("dose_id").references(() => doses.id, { onDelete: "set null" }),
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    note: text("note"),
+    status: text("status").$type<HelpStatus>().notNull().default("open"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("help_requests_profile_idx").on(t.profileId, t.status)],
 );
 
 export const APPOINTMENT_STATUSES = ["scheduled", "cancelled"] as const;
@@ -291,5 +361,7 @@ export const schema = {
   medications,
   routines,
   doses,
+  doseEvents,
+  helpRequests,
   appointments,
 };

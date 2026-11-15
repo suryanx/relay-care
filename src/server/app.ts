@@ -6,6 +6,7 @@ import { ZodError } from "zod";
 import { CLIENT_IP_HEADER, type Auth } from "./auth.js";
 import { HttpError } from "./authz.js";
 import type { Database } from "./db/client.js";
+import { adherenceRoutes } from "./routes/adherence.js";
 import { carePlanRoutes } from "./routes/carePlan.js";
 import { profileRoutes } from "./routes/profiles.js";
 
@@ -56,6 +57,7 @@ export function createApp({ db, auth, baseURL, trustProxy = false, devMode = fal
 
   app.use("/api", profileRoutes(db, auth));
   app.use("/api", carePlanRoutes(db, auth));
+  app.use("/api", adherenceRoutes(db, auth));
 
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "NOT_FOUND", "Not found.")));
 

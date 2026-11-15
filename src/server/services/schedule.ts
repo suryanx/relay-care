@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { DateTime } from "luxon";
 import type { Database } from "../db/client.js";
-import { doses, medications, profiles, routines, type DoseKind } from "../db/schema.js";
+import { doseEvents, doses, medications, profiles, routines, type DoseKind } from "../db/schema.js";
 
 /** Doses are materialised only inside [now - LOOKBACK, now + HORIZON). Never unbounded. */
 export const GENERATION_LOOKBACK_HOURS = 24;
@@ -70,16 +70,13 @@ export function generationWindow(now: Date): { from: Date; to: Date } {
   };
 }
 
-type Executor = Pick<Database, "select" | "insert" | "delete">;
+type Executor = Pick<Database, "select" | "selectDistinct" | "insert" | "delete" | "update">;
+type DoseInsert = typeof doses.$inferInsert;
 
-/**
- * Idempotently materialises doses for all active medications and routines of a profile.
- * Safe to run repeatedly or concurrently: ids are deterministic and inserts ignore conflicts.
- * Returns the number of newly inserted doses.
- */
-export async function generateDosesForProfile(db: Executor, profileId: string, now: Date = new Date()): Promise<number> {
+/** Every dose the current care plan wants inside the bounded window (pure read; writes nothing). */
+async function planProfileDoses(db: Executor, profileId: string, now: Date): Promise<DoseInsert[]> {
   const [profile] = await db.select({ timezone: profiles.timezone }).from(profiles).where(eq(profiles.id, profileId));
-  if (!profile) return 0;
+  if (!profile) return [];
   const { from, to } = generationWindow(now);
 
   const meds = await db
@@ -118,19 +115,84 @@ export async function generateDosesForProfile(db: Executor, profileId: string, n
       });
     }
   }
+  return rows;
+}
+
+/**
+ * Idempotently materialises doses for all active medications and routines of a profile.
+ * Safe to run repeatedly or concurrently: ids are deterministic and inserts ignore conflicts.
+ * Returns the number of newly inserted doses.
+ */
+export async function generateDosesForProfile(db: Executor, profileId: string, now: Date = new Date()): Promise<number> {
+  const rows = await planProfileDoses(db, profileId, now);
   if (rows.length === 0) return 0;
   const inserted = await db.insert(doses).values(rows).onConflictDoNothing({ target: doses.id }).returning({ id: doses.id });
   return inserted.length;
 }
 
 /**
- * After a medication/routine changes: remove its FUTURE doses that have no recorded outcome,
- * then regenerate. Past doses and any dose with an outcome are never touched.
+ * After a medication/routine changes, brings its FUTURE doses in line with the new plan:
+ * - future SCHEDULED doses with no history are replaced (deleted, then regenerated);
+ * - future SCHEDULED doses that have history (e.g. a snooze) are kept and relabelled if still
+ *   planned, otherwise VOIDED with an audit event — never deleted;
+ * - past doses and any dose with an outcome (taken / not taken / unconfirmed) are never touched.
+ * The conditional `status = 'scheduled'` guards make this safe against a concurrent confirmation.
  */
 export async function replanSource(db: Executor, kind: DoseKind, sourceId: string, profileId: string, now: Date = new Date()) {
   const sourceCol = kind === "medication" ? doses.medicationId : doses.routineId;
-  await db
-    .delete(doses)
-    .where(and(eq(sourceCol, sourceId), gt(doses.scheduledAt, now), inArray(doses.status, ["scheduled"])));
-  return generateDosesForProfile(db, profileId, now);
+  const planned = (await planProfileDoses(db, profileId, now)).filter((d) =>
+    kind === "medication" ? d.medicationId === sourceId : d.routineId === sourceId,
+  );
+  const plannedById = new Map(planned.map((d) => [d.id, d]));
+
+  const future = await db
+    .select({ id: doses.id })
+    .from(doses)
+    .where(and(eq(sourceCol, sourceId), gt(doses.scheduledAt, now), eq(doses.status, "scheduled")));
+  const futureIds = future.map((d) => d.id);
+  const withHistory = new Set(
+    futureIds.length === 0
+      ? []
+      : (await db.selectDistinct({ id: doseEvents.doseId }).from(doseEvents).where(inArray(doseEvents.doseId, futureIds))).map((e) => e.id),
+  );
+
+  const replaceable = futureIds.filter((id) => !withHistory.has(id));
+  if (replaceable.length > 0) {
+    await db.delete(doses).where(and(inArray(doses.id, replaceable), eq(doses.status, "scheduled")));
+  }
+
+  for (const id of withHistory) {
+    const plan = plannedById.get(id);
+    if (plan) {
+      await db
+        .update(doses)
+        .set({ label: plan.label, detail: plan.detail, updatedAt: now })
+        .where(and(eq(doses.id, id), eq(doses.status, "scheduled")));
+      continue;
+    }
+    const [voided] = await db
+      .update(doses)
+      .set({ status: "void", snoozeUntil: null, updatedAt: now })
+      .where(and(eq(doses.id, id), eq(doses.status, "scheduled")))
+      .returning({ id: doses.id, version: doses.version });
+    if (voided) {
+      await db.update(doses).set({ version: voided.version + 1 }).where(eq(doses.id, id));
+      await db.insert(doseEvents).values({
+        doseId: id,
+        profileId,
+        type: "void",
+        fromStatus: "scheduled",
+        toStatus: "void",
+        source: "system",
+        actorUserId: null,
+        note: "Removed by a schedule change",
+        recordedAt: now,
+      });
+    }
+  }
+
+  const toInsert = planned.filter((d) => !withHistory.has(d.id));
+  if (toInsert.length > 0) {
+    await db.insert(doses).values(toInsert).onConflictDoNothing({ target: doses.id });
+  }
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useParams } from "react-router";
-import { consentBasisLabels, type Appointment, type Medication, type ProfileDetail } from "../../shared/schemas";
+import { consentBasisLabels, type AdherenceResponse, type Appointment, type Medication, type ProfileDetail } from "../../shared/schemas";
+import { CountsGrid, PhaseChip, eventSummary } from "../components/adherence";
 import { ProfileNav } from "../components/ProfileNav";
 import { formatDate, formatTime } from "../lib/format";
 import { useApi } from "../lib/useApi";
@@ -23,6 +24,7 @@ export default function ProfileView() {
   const skipFetch = !me || me.isElder;
   const meds = useApi<Medication[]>(skipFetch ? null : `/profiles/${profileId}/medications`);
   const appts = useApi<Appointment[]>(skipFetch ? null : `/profiles/${profileId}/appointments`);
+  const today = useApi<AdherenceResponse>(skipFetch ? null : `/profiles/${profileId}/adherence`);
   useEffect(() => {
     if (skipFetch) return;
     let active = true;
@@ -54,6 +56,74 @@ export default function ProfileView() {
 
   return (
     <Shell title={profile.fullName} wide nav={<ProfileNav profileId={profile.id} name={profile.preferredName} />}>
+      {today.data && today.data.openHelpRequests.length > 0 && (
+        <section aria-labelledby="help-heading" className="mb-6 rounded-xl border-2 border-amber-700 bg-amber-50 p-5 text-amber-950">
+          <h2 id="help-heading" className="mb-2 text-xl font-bold">
+            {profile.preferredName} asked for help ({today.data.openHelpRequests.length})
+          </h2>
+          <ul className="space-y-1">
+            {today.data.openHelpRequests.map((h) => (
+              <li key={h.id}>
+                {new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short", timeZone: profile.timezone }).format(
+                  new Date(h.createdAt),
+                )}
+                {h.doseLabel ? ` — about ${h.doseLabel}` : ""}
+                {h.note ? ` — “${h.note}”` : ""}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-sm">Please check in with {profile.preferredName}. Email alerts and follow-up tracking arrive in a later update.</p>
+        </section>
+      )}
+
+      <Card>
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xl font-bold">Today’s medicines</h2>
+          <Link to={`/profiles/${profile.id}/schedule`} className="font-bold text-brand underline">
+            Open schedule
+          </Link>
+        </div>
+        {today.data === null ? (
+          <p role="status">Loading…</p>
+        ) : (
+          <>
+            <CountsGrid counts={today.data.counts} />
+            {today.data.doses.filter((d) => d.kind === "medication" && (d.phase === "due" || d.phase === "upcoming" || d.phase === "unconfirmed")).length > 0 && (
+              <>
+                <h3 className="mb-2 mt-4 font-bold">Needs attention or coming up</h3>
+                <ul className="space-y-1">
+                  {today.data.doses
+                    .filter((d) => d.kind === "medication" && (d.phase === "due" || d.phase === "upcoming" || d.phase === "unconfirmed"))
+                    .slice(0, 5)
+                    .map((d) => (
+                      <li key={d.id} className="flex flex-wrap items-center gap-2">
+                        <span className="w-14 font-bold">{formatTime(d.localTime)}</span>
+                        <span>{d.label}</span>
+                        <PhaseChip phase={d.phase} />
+                      </li>
+                    ))}
+                </ul>
+              </>
+            )}
+            {today.data.recentActivity.length > 0 && (
+              <>
+                <h3 className="mb-2 mt-4 font-bold">Recent activity</h3>
+                <ul className="space-y-1 text-sm">
+                  {today.data.recentActivity.slice(0, 6).map((e) => (
+                    <li key={e.id}>
+                      <span className="font-bold">
+                        {new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: profile.timezone }).format(new Date(e.recordedAt))}
+                      </span>{" "}
+                      {e.doseLabel} ({e.doseLocalTime}) — {eventSummary(e)}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </>
+        )}
+      </Card>
+
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <h2 className="mb-3 text-xl font-bold">Medicines</h2>
