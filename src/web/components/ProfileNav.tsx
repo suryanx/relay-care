@@ -7,6 +7,7 @@ const tabs = [
   { to: "medications", label: "Medicines" },
   { to: "routines", label: "Routines" },
   { to: "appointments", label: "Appointments" },
+  { to: "notifications", label: "Notifications" },
 ];
 
 /** Profile-specific navigation shown on every care-team page for one elderly person. */

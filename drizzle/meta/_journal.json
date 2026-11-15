@@ -22,6 +22,13 @@
       "when": 1794722179247,
       "tag": "0002_adherence",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794724687367,
+      "tag": "0003_notifications",
+      "breakpoints": true
     }
   ]
 }

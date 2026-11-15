@@ -8,7 +8,9 @@ import { HttpError } from "./authz.js";
 import type { Database } from "./db/client.js";
 import { adherenceRoutes } from "./routes/adherence.js";
 import { carePlanRoutes } from "./routes/carePlan.js";
+import { notificationRoutes, sweepRoute } from "./routes/notifications.js";
 import { profileRoutes } from "./routes/profiles.js";
+import { previewConfig, type NotifierConfig } from "./services/notifications.js";
 
 export interface CreateAppOptions {
   db: Database;
@@ -18,10 +20,15 @@ export interface CreateAppOptions {
   trustProxy?: boolean;
   /** Content Security Policy is relaxed only for the Vite dev server. */
   devMode?: boolean;
+  /** Email/outbox settings. Defaults to preview-only (nothing is ever sent). */
+  notifier?: NotifierConfig;
+  /** Secret for POST /internal/sweep; endpoint returns 503 when absent. */
+  sweepSecret?: string;
 }
 
 /** Builds the Express app (no listening, no frontend) so tests can drive it directly. */
-export function createApp({ db, auth, baseURL, trustProxy = false, devMode = false }: CreateAppOptions): Express {
+export function createApp({ db, auth, baseURL, trustProxy = false, devMode = false, notifier, sweepSecret }: CreateAppOptions): Express {
+  const notifierCfg = notifier ?? previewConfig(baseURL);
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxy ? 1 : false);
@@ -51,6 +58,9 @@ export function createApp({ db, auth, baseURL, trustProxy = false, devMode = fal
     next();
   });
 
+  // External scheduler entry point (bearer secret; not under /api, no cookies involved).
+  app.use(sweepRoute(db, notifierCfg, sweepSecret));
+
   app.get("/healthz", (_req, res) => {
     res.json({ status: "ok" });
   });
@@ -58,6 +68,7 @@ export function createApp({ db, auth, baseURL, trustProxy = false, devMode = fal
   app.use("/api", profileRoutes(db, auth));
   app.use("/api", carePlanRoutes(db, auth));
   app.use("/api", adherenceRoutes(db, auth));
+  app.use("/api", notificationRoutes(db, auth, notifierCfg));
 
   app.use("/api", (_req, _res, next) => next(new HttpError(404, "NOT_FOUND", "Not found.")));
 

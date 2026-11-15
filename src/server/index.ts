@@ -3,6 +3,7 @@ import { createApp, serveStaticWeb } from "./app.js";
 import { createAuth } from "./auth.js";
 import { loadEnv } from "./config.js";
 import { openDatabase } from "./db/client.js";
+import { resolveRealSending } from "./email/index.js";
 
 async function main() {
   const env = loadEnv();
@@ -20,13 +21,25 @@ async function main() {
   }
 
   const auth = createAuth({ db: handle.db, baseURL: env.BETTER_AUTH_URL, secret });
+  const { realSendEnabled, provider } = resolveRealSending(env);
   const app = createApp({
     db: handle.db,
     auth,
     baseURL: env.BETTER_AUTH_URL,
     trustProxy: env.TRUST_PROXY === "1",
     devMode: !isProd,
+    sweepSecret: env.SWEEP_SECRET,
+    notifier: {
+      provider,
+      realSendEnabled,
+      realSendCap: env.EMAIL_REAL_SEND_CAP,
+      maxPerSweep: env.SWEEP_MAX_PER_RUN,
+      maxPerProfilePerSweep: env.SWEEP_MAX_PER_PROFILE,
+      appUrl: env.BETTER_AUTH_URL,
+    },
   });
+  // No in-process polling loop: reminders run only when /internal/sweep (or the admin check) is called.
+  console.info(`[relay] email mode: ${realSendEnabled ? `REAL (cap ${env.EMAIL_REAL_SEND_CAP})` : "preview (no emails sent)"}; sweep endpoint ${env.SWEEP_SECRET ? "enabled" : "disabled"}`);
 
   if (isProd) {
     serveStaticWeb(app);

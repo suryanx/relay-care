@@ -154,24 +154,31 @@ export default function ProfileView() {
           )}
         </Card>
         <Card>
-          <h2 className="mb-3 text-xl font-bold">Details</h2>
+          <h2 className="mb-3 text-xl font-bold">Care recipient</h2>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+            <dt className="font-bold">Name</dt>
+            <dd>{profile.fullName}</dd>
             <dt className="font-bold">Called</dt>
             <dd>{profile.preferredName}</dd>
             <dt className="font-bold">Time zone</dt>
             <dd>{profile.timezone}</dd>
-            <dt className="font-bold">Your role</dt>
-            <dd>{roleLabel[profile.role]}</dd>
+            <dt className="font-bold">Own sign-in</dt>
+            <dd>{profile.hasElderAccount ? `Yes (${profile.elderUsername}) — elder view only` : "Not set up"}</dd>
           </dl>
+          <p className="mt-3 rounded-lg bg-canvas p-2 text-sm">
+            Viewing as: <strong>{roleLabel[profile.role]}</strong>
+          </p>
         </Card>
         <Card>
           <h2 className="mb-3 text-xl font-bold">Care team</h2>
           <ul className="space-y-1">
-            {profile.members.map((m) => (
-              <li key={m.userId}>
-                {m.name} <span className="text-muted">— {roleLabel[m.role]}</span>
-              </li>
-            ))}
+            {profile.members
+              .filter((m) => m.role !== "elder")
+              .map((m) => (
+                <li key={m.userId}>
+                  {m.name} <span className="text-muted">— {roleLabel[m.role]}</span>
+                </li>
+              ))}
           </ul>
         </Card>
       </div>

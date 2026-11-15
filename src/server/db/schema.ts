@@ -133,6 +133,10 @@ export const profileMembers = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     role: text("role").$type<MemberRole>().notNull(),
+    // Email preferences (ignored for elder accounts, which never receive email).
+    notifyDoseReminders: boolean("notify_dose_reminders").notNull().default(true),
+    notifyAlerts: boolean("notify_alerts").notNull().default(true),
+    notifyAppointments: boolean("notify_appointments").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -350,6 +354,96 @@ export const appointments = pgTable(
   (t) => [index("appointments_profile_starts_idx").on(t.profileId, t.startsAt)],
 );
 
+/* ------------------------------------------------------------------ */
+/* Notification outbox                                                 */
+/* ------------------------------------------------------------------ */
+
+export const NOTIFICATION_TYPES = [
+  "dose_reminder",
+  "dose_snooze_reminder",
+  "dose_unconfirmed",
+  "dose_not_taken",
+  "appointment_reminder",
+  "help_request",
+] as const;
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+/**
+ * queued      → waiting (also used for retry, with next_attempt_at in the future)
+ * sending     → claimed by one sweep worker
+ * accepted    → the email provider ACCEPTED it (not proof of inbox delivery)
+ * previewed   → rendered in preview mode; no external email was sent
+ * failed      → gave up (permanent provider error, no valid recipient, or retries exhausted)
+ * uncertain   → outcome unknown (e.g. timeout after the request left); never auto-retried, to avoid duplicates
+ * paused_limit→ held because the real-send cap was reached
+ * cancelled   → no longer relevant (state changed, corrected, expired, appointment moved/cancelled)
+ */
+export const NOTIFICATION_STATUSES = ["queued", "sending", "accepted", "previewed", "failed", "uncertain", "paused_limit", "cancelled"] as const;
+export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    /** Deterministic per logical reminder + recipient; the unique index makes queueing idempotent. */
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    profileId: text("profile_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    type: text("type").$type<NotificationType>().notNull(),
+    recipientUserId: text("recipient_user_id").references(() => user.id, { onDelete: "set null" }),
+    /** Safe, non-clinical text only (no medicine names). Re-rendered at send time. */
+    subject: text("subject").notNull(),
+    preview: text("preview").notNull(),
+    doseId: text("dose_id"),
+    appointmentId: text("appointment_id"),
+    helpRequestId: text("help_request_id"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    status: text("status").$type<NotificationStatus>().notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull(),
+    /** "console" (preview) or "brevo" (real external request). */
+    provider: text("provider"),
+    providerMessageId: text("provider_message_id"),
+    lastError: text("last_error"),
+    cancelReason: text("cancel_reason"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("notifications_status_next_idx").on(t.status, t.nextAttemptAt),
+    index("notifications_profile_created_idx").on(t.profileId, t.createdAt),
+  ],
+);
+
+/** Single-row lease so only one sweep runs at a time (works across instances). */
+export const sweepLocks = pgTable("sweep_locks", {
+  id: text("id").primaryKey(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }).notNull(),
+  holder: text("holder"),
+});
+
+export const sweepRuns = pgTable(
+  "sweep_runs",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    trigger: text("trigger").$type<"scheduler" | "manual">().notNull(),
+    profileId: text("profile_id").references(() => profiles.id, { onDelete: "cascade" }),
+    triggeredBy: text("triggered_by").references(() => user.id, { onDelete: "set null" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    summary: text("summary"),
+  },
+  (t) => [index("sweep_runs_profile_started_idx").on(t.profileId, t.startedAt)],
+);
+
 export const schema = {
   user,
   session,
@@ -364,4 +458,7 @@ export const schema = {
   doseEvents,
   helpRequests,
   appointments,
+  notifications,
+  sweepLocks,
+  sweepRuns,
 };

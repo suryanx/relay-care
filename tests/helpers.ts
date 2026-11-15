@@ -3,6 +3,7 @@ import type { Express } from "express";
 import { createApp } from "../src/server/app.js";
 import { createAuth, type AuthRateLimit } from "../src/server/auth.js";
 import { openDatabase, type DatabaseHandle } from "../src/server/db/client.js";
+import type { NotifierConfig } from "../src/server/services/notifications.js";
 
 export const BASE_URL = "http://localhost:3000";
 
@@ -12,7 +13,10 @@ export interface TestContext {
 }
 
 /** Fresh in-memory PGlite database + app per suite. */
-export async function makeTestApp(credentialRateLimit: AuthRateLimit = { window: 60, max: 1000 }): Promise<TestContext> {
+export async function makeTestApp(
+  credentialRateLimit: AuthRateLimit = { window: 60, max: 1000 },
+  extra: { notifier?: NotifierConfig; sweepSecret?: string } = {},
+): Promise<TestContext> {
   const handle = await openDatabase({ kind: "pglite" });
   const auth = createAuth({
     db: handle.db,
@@ -20,7 +24,7 @@ export async function makeTestApp(credentialRateLimit: AuthRateLimit = { window:
     secret: "test-secret-test-secret-test-secret-123",
     credentialRateLimit,
   });
-  const app = createApp({ db: handle.db, auth, baseURL: BASE_URL });
+  const app = createApp({ db: handle.db, auth, baseURL: BASE_URL, ...extra });
   return { app, handle };
 }
 

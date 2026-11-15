@@ -7,6 +7,7 @@ import Home from "./pages/Home";
 import MedicationForm from "./pages/MedicationForm";
 import Medications from "./pages/Medications";
 import NewProfile from "./pages/NewProfile";
+import Notifications from "./pages/Notifications";
 import ProfileView from "./pages/ProfileView";
 import Register from "./pages/Register";
 import Routines from "./pages/Routines";
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/profiles/:profileId/appointments" element={<Appointments />} />
         <Route path="/profiles/:profileId/appointments/new" element={<AppointmentForm />} />
         <Route path="/profiles/:profileId/appointments/:appointmentId/edit" element={<AppointmentForm />} />
+        <Route path="/profiles/:profileId/notifications" element={<Notifications />} />
         <Route path="/elder" element={<ElderHome />} />
         <Route path="*" element={<Home />} />
       </Routes>

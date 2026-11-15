@@ -9,7 +9,45 @@ Relay is a shared care platform for an elderly person, their family and their ca
 - **Checkpoint 1 (foundation):** sign-in, profiles, roles, an elder device sign-in, the email provider abstraction and tests.
 - **Checkpoint 2 (care plan):** medicines, daily routines, appointments, and deterministic dose generation in the profile's time zone (bounded 24 h back / 48 h ahead, idempotent, DST-safe).
 - **Checkpoint 3 (adherence):** an elder dashboard with four actions, a deterministic dose state machine, an append-only event history with provenance, corrections, help requests, and a family adherence view.
-- **Coming next:** scheduled email reminders (Checkpoint 4) and caregiver follow-up and notification (Checkpoint 5).
+- **Checkpoint 4 (notifications):** a database-backed email outbox, a protected sweep endpoint, medicine/unconfirmed/not-taken/appointment/help emails, dedup, retries, real-send caps, and an admin Notification Center.
+- **Coming next:** caregiver follow-up and notification routing (Checkpoint 5).
+
+## Email reminders and the sweep
+
+One idempotent **sweep** does all background work: top up doses → mark overdue doses Unconfirmed → queue due notifications → send (or preview) them. Nothing runs in the background by itself. A sweep happens only when:
+
+- an external scheduler calls `POST /internal/sweep` with `Authorization: Bearer $SWEEP_SECRET` (503 if no secret is configured, 401 if the secret is wrong); or
+- a family administrator clicks **Run reminder check now**. This uses their session, is scoped to their profile, has a 30 s cooldown, and runs the same code.
+
+Later, a scheduler such as cron-job.org can call it every 5 minutes:
+
+```bash
+curl -X POST https://<your-app>/internal/sweep -H "Authorization: Bearer $SWEEP_SECRET"
+```
+
+| Email | When | To (opted-in, never the elder) | Cancelled if |
+|---|---|---|---|
+| Medicine reminder | dose time − lead time | admins and caregivers | dose recorded, voided, snoozed, medicine stopped, or grace period passed |
+| Reminder again | when a "remind me later" ends | admins and caregivers | dose recorded |
+| Unconfirmed alert | after the grace period | admins | dose confirmed or reported before sending |
+| Reported not taken | after an explicit report | admins | corrected before sending |
+| Appointment reminder | `reminderHoursBefore` (default 24 h) | admins and caregivers | appointment cancelled or moved (a new reminder is queued) |
+| Help request | when requested | admins | request closed |
+
+Emails never contain medicine names, doctor names or dosing advice. They link back to Relay instead.
+
+**Statuses:** `queued` → `sending` → `accepted` (the provider accepted it; **not** proof of delivery), `previewed` (not sent), `failed`, `uncertain`, `paused_limit` or `cancelled`.
+
+**Exactly-once policy:** dedup keys make queueing idempotent, and a database lease plus row claiming stop two workers from sending the same row. A provider HTTP error (429/5xx) is retried with backoff (2, 4, 8 … min, at most 3 attempts). A timeout or network error after the request left is marked `uncertain` and is **never retried**: we would rather miss an email than send a duplicate medicine alert.
+
+### Real-email safety
+| Setting | Default | Effect |
+|---|---|---|
+| `REAL_EMAIL_SEND_ENABLED` | `false` | Real email requires exactly `true` **and** a Brevo key. A key alone never sends. Tests always preview. |
+| `EMAIL_REAL_SEND_CAP` | `20` | Persistent cap (accepted + uncertain, counted in the database). Once reached, items become `paused_limit`. |
+| `SWEEP_MAX_PER_RUN` | `25` | Maximum notifications processed per sweep. |
+| `SWEEP_MAX_PER_PROFILE` | `10` | Maximum per profile per sweep; the rest wait for the next sweep. |
+| `SWEEP_SECRET` | unset | Enables `/internal/sweep` (at least 32 characters). |
 
 ### Adherence principles
 - States: `scheduled`, `taken`, `not_taken`, `unconfirmed`, `void`. **Silence never becomes "not taken".** Only the system marks a dose `unconfirmed`, and only after the profile's grace period (default 60 min, or later if the dose was snoozed).

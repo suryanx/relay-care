@@ -293,3 +293,68 @@ export interface AdherenceResponse {
   recentActivity: DoseEventView[];
   openHelpRequests: HelpRequestView[];
 }
+
+/* -------------------------- Notifications -------------------------- */
+
+export const notificationPreferencesSchema = z.object({
+  notifyDoseReminders: z.boolean(),
+  notifyAlerts: z.boolean(),
+  notifyAppointments: z.boolean(),
+});
+export type NotificationPreferences = z.infer<typeof notificationPreferencesSchema>;
+
+export type NotificationTypeValue =
+  | "dose_reminder"
+  | "dose_snooze_reminder"
+  | "dose_unconfirmed"
+  | "dose_not_taken"
+  | "appointment_reminder"
+  | "help_request";
+export type NotificationStatusValue = "queued" | "sending" | "accepted" | "previewed" | "failed" | "uncertain" | "paused_limit" | "cancelled";
+
+export interface NotificationItem {
+  id: string;
+  type: NotificationTypeValue;
+  status: NotificationStatusValue;
+  subject: string;
+  preview: string;
+  related: string | null;
+  recipientName: string;
+  recipientMasked: string;
+  dueAt: string;
+  createdAt: string;
+  sentAt: string | null;
+  attempts: number;
+  nextAttemptAt: string | null;
+  providerAccepted: boolean;
+  hasProviderMessageId: boolean;
+  lastError: string | null;
+  cancelReason: string | null;
+}
+
+export interface SweepSummaryView {
+  status: "completed" | "skipped_locked";
+  mode: "preview" | "real";
+  queued: number;
+  previewed: number;
+  accepted: number;
+  cancelled: number;
+  failed: number;
+  uncertain: number;
+  pausedLimit: number;
+  retryScheduled: number;
+  deferred: number;
+  markedUnconfirmed: number;
+  dosesGenerated: number;
+  realSendsUsed: number;
+  realSendCap: number;
+}
+
+export interface NotificationCenterResponse {
+  mode: "preview" | "real";
+  realSendsUsed: number;
+  realSendCap: number;
+  cooldownSeconds: number;
+  lastRun: { startedAt: string; trigger: "scheduler" | "manual"; summary: SweepSummaryView | null } | null;
+  items: NotificationItem[];
+}

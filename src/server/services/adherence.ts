@@ -67,6 +67,16 @@ export function unconfirmedDeadline(dose: Pick<DoseState, "scheduledAt" | "snooz
 }
 
 /**
+ * "Remind me later" postpones the NEXT REMINDER, never the prescribed time:
+ * 15 minutes after the later of now, the scheduled time, and any current snooze.
+ * So a snooze requested before the dose is due can never end before the dose is due.
+ */
+export function snoozeUntilFor(dose: Pick<DoseState, "scheduledAt" | "snoozeUntil">, now: Date): Date {
+  const from = Math.max(now.getTime(), dose.scheduledAt.getTime(), dose.snoozeUntil?.getTime() ?? 0);
+  return new Date(from + SNOOZE_MINUTES * MIN);
+}
+
+/**
  * Pure, deterministic state machine. Given the current dose and an action, decides what happens.
  * The database layer applies the decision with an optimistic-concurrency check.
  */
@@ -136,7 +146,7 @@ export function decide(dose: DoseState, action: DoseAction, actor: Actor, now: D
       if (dose.snoozeCount >= MAX_SNOOZES) return reject(409, "SNOOZE_LIMIT", `“Remind me later” can be used ${MAX_SNOOZES} times per dose.`);
       return {
         kind: "apply",
-        patch: { snoozeCount: dose.snoozeCount + 1, snoozeUntil: new Date(now.getTime() + SNOOZE_MINUTES * MIN) },
+        patch: { snoozeCount: dose.snoozeCount + 1, snoozeUntil: snoozeUntilFor(dose, now) },
         event: { type: "snooze", to: "scheduled", source: "self_reported" },
       };
     }

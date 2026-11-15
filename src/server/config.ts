@@ -14,6 +14,14 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().optional(),
   EMAIL_FROM_NAME: z.string().default("Relay Care"),
   TRUST_PROXY: z.enum(["0", "1"]).default("0"),
+  /** Master switch for real email. Default false: notifications are previewed, never sent. */
+  REAL_EMAIL_SEND_ENABLED: z.enum(["true", "false"]).default("false"),
+  /** Persistent cap on real sends (accepted + uncertain) across the database. */
+  EMAIL_REAL_SEND_CAP: z.coerce.number().int().min(0).max(5000).default(20),
+  SWEEP_MAX_PER_RUN: z.coerce.number().int().min(1).max(200).default(25),
+  SWEEP_MAX_PER_PROFILE: z.coerce.number().int().min(1).max(100).default(10),
+  /** Shared secret for POST /internal/sweep. Endpoint is disabled when unset. */
+  SWEEP_SECRET: z.string().min(32, "SWEEP_SECRET must be at least 32 characters").optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
