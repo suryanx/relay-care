@@ -20,6 +20,7 @@ import {
 import { ConsoleEmailProvider } from "../email/console.js";
 import { EmailSendError, type EmailProvider } from "../email/types.js";
 import { markOverdueUnconfirmed } from "./adherence.js";
+import { purgeExpiredSandboxes } from "./demoSandbox.js";
 import { syncIncidents } from "./incidents.js";
 import { generateDosesForProfile } from "./schedule.js";
 
@@ -669,6 +670,7 @@ export async function runSweep(db: Database, cfg: NotifierConfig, opts: SweepOpt
     .returning({ id: sweepRuns.id });
   try {
     const recovered = await recoverStuck(db, now);
+    if (!opts.profileId) await purgeExpiredSandboxes(db, now);
     const profileIds = opts.profileId
       ? [opts.profileId]
       : (await db.select({ id: profiles.id }).from(profiles).where(isNull(profiles.archivedAt))).map((p) => p.id);

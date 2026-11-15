@@ -43,6 +43,13 @@
       "when": 1794733495794,
       "tag": "0005_profile_archive",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794735052556,
+      "tag": "0006_demo_sandboxes",
+      "breakpoints": true
     }
   ]
 }

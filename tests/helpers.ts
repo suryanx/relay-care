@@ -15,7 +15,7 @@ export interface TestContext {
 /** Fresh in-memory PGlite database + app per suite. */
 export async function makeTestApp(
   credentialRateLimit: AuthRateLimit = { window: 60, max: 1000 },
-  extra: { notifier?: NotifierConfig; sweepSecret?: string } = {},
+  extra: { notifier?: NotifierConfig; sweepSecret?: string; demoSecret?: string } = {},
 ): Promise<TestContext> {
   const handle = await openDatabase({ kind: "pglite" });
   const auth = createAuth({

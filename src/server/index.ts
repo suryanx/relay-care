@@ -29,6 +29,7 @@ async function main() {
     trustProxy: env.TRUST_PROXY === "1",
     devMode: !isProd,
     sweepSecret: env.SWEEP_SECRET,
+    demoSecret: secret,
     notifier: {
       provider,
       realSendEnabled,

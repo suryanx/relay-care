@@ -142,3 +142,12 @@ export function requireElder(db: Database): RequestHandler {
     }
   };
 }
+
+/** Demo personas use @demo.relay.invalid accounts; some actions make no sense (or could be abused) there. */
+export const forbidDemo: RequestHandler = (req, _res, next) => {
+  if (req.authCtx?.user.email?.toLowerCase().endsWith("@demo.relay.invalid")) {
+    next(new HttpError(403, "DEMO_RESTRICTED", "This isn’t available in the demo. Create your own account to try it."));
+    return;
+  }
+  next();
+};

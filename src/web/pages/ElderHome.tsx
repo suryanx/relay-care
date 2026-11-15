@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import type { DoseView, ElderTodayResponse } from "../../shared/schemas";
+import { DemoBanner } from "../components/DemoBanner";
 import { Logo, Pill, buttonClass, type Tone } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { authClient } from "../lib/auth-client";
@@ -150,6 +151,7 @@ export default function ElderHome() {
         </div>
       </header>
 
+      <DemoBanner />
       <main id="main" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 pt-10 text-xl sm:pt-14">
         <h1 className="font-display text-5xl font-medium leading-tight sm:text-6xl">{greeting(data.preferredName, tz, now)}</h1>
         <p className="num mt-3 whitespace-normal text-2xl text-muted sm:hidden">{clock}</p>

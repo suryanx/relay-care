@@ -2,7 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { Router } from "express";
 import { createInvitationSchema, invitationTokenSchema, type InvitationView } from "../../shared/schemas.js";
 import type { Auth } from "../auth.js";
-import { HttpError, asyncHandler, requireFreshSession, requireMember, requireSession } from "../authz.js";
+import { HttpError, asyncHandler, forbidDemo, requireFreshSession, requireMember, requireSession } from "../authz.js";
 import type { Database } from "../db/client.js";
 import { caregiverInvitations, user } from "../db/schema.js";
 import { acceptInvitation, createInvitation, invitationState, previewInvitation, removeCaregiver } from "../services/invitations.js";
@@ -16,6 +16,7 @@ export function careTeamRoutes(db: Database, auth: Auth, appUrl: string): Router
   router.post(
     "/profiles/:profileId/invitations",
     ...admin,
+    forbidDemo,
     requireFreshSession,
     asyncHandler(async (req, res) => {
       const { email } = createInvitationSchema.parse(req.body);
@@ -100,6 +101,7 @@ export function careTeamRoutes(db: Database, auth: Auth, appUrl: string): Router
   router.post(
     "/invitations/accept",
     signedIn,
+    forbidDemo,
     asyncHandler(async (req, res) => {
       const { token } = invitationTokenSchema.parse(req.body);
       const result = await acceptInvitation(db, token, { userId: req.authCtx!.userId, email: req.authCtx!.user.email });

@@ -75,6 +75,8 @@ export interface MeResponse {
   user: { id: string; name: string; email: string | null; username: string | null };
   memberships: ProfileSummary[];
   isElder: boolean;
+  /** Set when signed in as a synthetic demo persona. */
+  demo: "elder" | "caregiver" | "family" | null;
 }
 
 /* ---------------------------- Care plan ---------------------------- */

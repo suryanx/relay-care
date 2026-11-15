@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { Link, useNavigate } from "react-router";
 import { authClient } from "../lib/auth-client";
+import { DemoBanner } from "./DemoBanner";
 import { useSession } from "../lib/session";
 
 /* ------------------------------------------------------------------ */
@@ -98,6 +99,7 @@ export function Shell({
         Skip to main content
       </a>
       <AppHeader />
+      <DemoBanner />
       {nav ? (
         <div className="mx-auto grid w-full max-w-7xl flex-1 gap-x-10 px-4 pb-16 pt-6 sm:px-6 lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:pt-10">
           <aside className="min-w-0 lg:sticky lg:top-24 lg:self-start">{nav}</aside>

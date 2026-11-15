@@ -543,6 +543,30 @@ export const incidentEvents = pgTable(
   (t) => [index("incident_events_incident_idx").on(t.incidentId, t.recordedAt)],
 );
 
+/* ------------------------------------------------------------------ */
+/* Interactive demo sandboxes                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One private, synthetic care circle per demo visitor. Its four accounts use non-routable
+ * @demo.relay.invalid addresses and server-derived passwords nobody knows. Deleted after 24 h.
+ */
+export const demoSandboxes = pgTable(
+  "demo_sandboxes",
+  {
+    id: text("id").primaryKey(),
+    /** SHA-256 of the visitor's demo cookie; only the holder can switch personas. */
+    tokenHash: text("token_hash").notNull().unique(),
+    profileId: text("profile_id").references(() => profiles.id, { onDelete: "set null" }),
+    adminUserId: text("admin_user_id").notNull(),
+    caregiverUserId: text("caregiver_user_id").notNull(),
+    otherCaregiverUserId: text("other_caregiver_user_id").notNull(),
+    elderUserId: text("elder_user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("demo_sandboxes_created_idx").on(t.createdAt)],
+);
+
 export const schema = {
   user,
   session,
@@ -563,4 +587,5 @@ export const schema = {
   caregiverInvitations,
   incidents,
   incidentEvents,
+  demoSandboxes,
 };

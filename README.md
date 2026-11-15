@@ -96,6 +96,14 @@ The direction is **Warm Botanical × Editorial Minimalism**.
 ### Public demo (`/demo`)
 Three fictional perspectives share one simulated morning: Swastik (elder), Ravi (caregiver) and Priya (family administrator). Actions run entirely in the browser through a small deterministic reducer (`src/web/demo/model.ts`, unit-tested): no API calls, no accounts, no email, no database. Taking a dose, asking for help, claiming and resolving a follow-up all update the other two views. "Reset demo" restores the story.
 
+### Interactive real-app demo (from the sign-in page)
+"Just exploring Relay?" opens the **real** dashboards as Swastik, Ravi or Priya. Each visitor gets a private synthetic care circle, created on demand by `POST /api/demo/start`:
+- Four accounts with `@demo.relay.invalid` addresses, so email rules never send to them. Their passwords are derived on the server with HMAC(server secret) and are never shown or stored.
+- Switching person only works within the circle bound to the visitor's HttpOnly `relay_demo` cookie. A forged or expired cookie just creates a new circle; it never reaches someone else's.
+- Demo accounts cannot invite people, create care circles, create sign-ins or accept invitations.
+- Rate-limited per IP and globally. Circles and their accounts are deleted by the sweep after 24 h.
+- The public `/demo` page (linked from the landing page) is unchanged: a browser-only simulation.
+
 ### Care profile lifecycle
 - **Archive a care circle** (admin only, recent sign-in, type the person's name): it is hidden from everyone, the elder's device is signed out, and pending reminder emails are cancelled. **No records are deleted.** It can be restored from "People you care for".
 - **Remove a caregiver** is a separate action in Care team. Relay has no "delete user account" action.

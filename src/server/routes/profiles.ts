@@ -11,9 +11,10 @@ import {
   type ProfileSummary,
 } from "../../shared/schemas.js";
 import type { Auth } from "../auth.js";
-import { HttpError, asyncHandler, requireFreshSession, requireMember, requireSession } from "../authz.js";
+import { HttpError, asyncHandler, forbidDemo, requireFreshSession, requireMember, requireSession } from "../authz.js";
 import type { Database } from "../db/client.js";
 import { notifications, profileMembers, profiles, session, user } from "../db/schema.js";
+import { demoPersonaFor } from "../services/demoSandbox.js";
 
 /** Elder accounts sign in by username; Better Auth still needs a unique, non-routable email. */
 const elderPlaceholderEmail = (profileId: string) => `elder-${profileId}@accounts.relay.invalid`;
@@ -53,6 +54,7 @@ export function profileRoutes(db: Database, auth: Auth): Router {
         },
         memberships,
         isElder,
+        demo: await demoPersonaFor(db, ctx.userId),
       };
       res.json(body);
     }),
@@ -61,6 +63,7 @@ export function profileRoutes(db: Database, auth: Auth): Router {
   router.post(
     "/profiles",
     signedIn,
+    forbidDemo,
     asyncHandler(async (req, res) => {
       const ctx = req.authCtx!;
       const memberships = await listMemberships(db, ctx.userId);
@@ -142,6 +145,7 @@ export function profileRoutes(db: Database, auth: Auth): Router {
   router.post(
     "/profiles/:profileId/elder-account",
     signedIn,
+    forbidDemo,
     requireMember(db, ["admin"]),
     requireFreshSession,
     asyncHandler(async (req, res) => {

@@ -1,16 +1,18 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { Card, Field, FormError, PrimaryButton, Shell } from "../components/ui";
+import { DEMO_PEOPLE, openDemo } from "../components/DemoBanner";
+import { ApiError } from "../lib/api";
 import { authClient } from "../lib/auth-client";
 import { useSession } from "../lib/session";
 
 type Mode = "email" | "username";
 
-const DEMO_SHORTCUTS = [
-  { role: "elder", person: "Swastik", label: "Elder: one medicine at a time, four large buttons" },
-  { role: "caregiver", person: "Ravi", label: "Caregiver: picks up and closes follow-ups" },
-  { role: "family", person: "Priya", label: "Family: sees whether today is on track" },
-] as const;
+const SHORTCUT_TEXT = {
+  elder: "Elder: one medicine at a time, four large buttons",
+  caregiver: "Caregiver: picks up and closes follow-ups",
+  family: "Family: sees whether today is on track",
+} as const;
 
 export default function SignIn() {
   const navigate = useNavigate();
@@ -18,6 +20,8 @@ export default function SignIn() {
   const [mode, setMode] = useState<Mode>("email");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [demoBusy, setDemoBusy] = useState<string | null>(null);
+  const [demoError, setDemoError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -47,7 +51,7 @@ export default function SignIn() {
       <p className="-mt-4 mb-6 text-lg">
         Just exploring?{" "}
         <a href="#explore-heading" className="font-bold text-brand underline underline-offset-4">
-          Try the interactive demo
+          Try the app with synthetic data
         </a>
         . No account needed.
       </p>
@@ -87,24 +91,38 @@ export default function SignIn() {
           Just exploring Relay?
         </h2>
         <p className="mt-2 text-lg">
-          Try the interactive demo. No account required. These are simulated, fictional people, not real accounts, and nothing you do there is saved.
+          Try the real app with synthetic data. No account required. You get a private, fictional care circle that nobody else sees; nothing is emailed,
+          and it is deleted after a day.
         </p>
+        <FormError message={demoError} />
         <ul className="mt-5 grid gap-3">
-          {DEMO_SHORTCUTS.map((d) => (
+          {DEMO_PEOPLE.map((d) => (
             <li key={d.role}>
-              <Link
-                to={`/demo?role=${d.role}`}
-                className="group flex min-h-16 items-center gap-4 rounded-md border-2 border-line-strong bg-surface px-4 py-3 no-underline hover:border-brand"
+              <button
+                type="button"
+                disabled={demoBusy !== null}
+                aria-busy={demoBusy === d.role || undefined}
+                onClick={async () => {
+                  setDemoBusy(d.role);
+                  setDemoError(null);
+                  try {
+                    await openDemo(d.role);
+                  } catch (err) {
+                    setDemoError(err instanceof ApiError ? err.body.message : "The demo could not start. Please try again.");
+                    setDemoBusy(null);
+                  }
+                }}
+                className="group flex min-h-16 w-full items-center gap-4 rounded-md border-2 border-line-strong bg-surface px-4 py-3 text-left hover:border-brand disabled:opacity-70"
               >
                 <span aria-hidden="true" className={`grid size-12 shrink-0 place-items-center rounded-full font-display text-2xl text-brand-ink ${d.role === "elder" ? "bg-terracotta" : "bg-brand"}`}>
                   {d.person.slice(0, 1)}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-display text-2xl leading-tight text-ink">{d.person}</span>
-                  <span className="block text-base text-muted">{d.label}</span>
+                  <span className="block text-base text-muted">{SHORTCUT_TEXT[d.role]}</span>
                 </span>
-                <span className="font-bold text-brand group-hover:underline">Open demo</span>
-              </Link>
+                <span className="font-bold text-brand group-hover:underline">{demoBusy === d.role ? "Opening…" : "Open demo"}</span>
+              </button>
             </li>
           ))}
         </ul>
