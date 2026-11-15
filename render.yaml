@@ -1,0 +1,41 @@
+# Render Blueprint for Relay: one Node web service serving the API and the built React app.
+# Secrets are marked sync: false and must be entered in the Render dashboard (never committed).
+services:
+  - type: web
+    name: relay-care
+    runtime: node
+    region: singapore
+    plan: free
+    branch: main
+    # Dev dependencies (Vite, TypeScript) are needed to build, even though NODE_ENV=production at runtime.
+    buildCommand: npm ci --include=dev && npm run build
+    # Applies the Drizzle SQL migrations (journaled, idempotent) on boot, then serves on $PORT.
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: BETTER_AUTH_URL
+        sync: false # e.g. https://relay-care.onrender.com (exact public URL, no trailing slash)
+      - key: BETTER_AUTH_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false # Neon pooled connection string, with sslmode=require
+      - key: SWEEP_SECRET
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: brevo
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: Relay Care
+      - key: REAL_EMAIL_SEND_ENABLED
+        value: "false"
+      - key: EMAIL_REAL_SEND_CAP
+        value: "20"
