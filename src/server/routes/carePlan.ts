@@ -1,5 +1,5 @@
 import { and, asc, eq, gte, ne } from "drizzle-orm";
-import { Router, type Request } from "express";
+import { Router, type Request, type RequestHandler } from "express";
 import { DateTime } from "luxon";
 import {
   createAppointmentSchema,
@@ -71,188 +71,168 @@ function toAppointment(a: typeof appointments.$inferSelect, zone: string): Appoi
   };
 }
 
+type MedicationRow = typeof medications.$inferSelect;
+type RoutineRow = typeof routines.$inferSelect;
+type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+/** Fields every new medicine or routine row gets besides the validated input. */
+interface NewSourceFields {
+  endDate: string | null;
+  profileId: string;
+  createdBy: string;
+  updatedBy: string;
+  scheduleEffectiveFrom: Date;
+}
+/** What an edit or a deactivation writes. */
+type SourcePatch<Input> =
+  | (Input & { endDate: string | null; updatedBy: string; updatedAt: Date; scheduleEffectiveFrom: Date })
+  | { active: false; deactivatedAt: Date; updatedBy: string; updatedAt: Date };
+
+/**
+ * Medicines and routines are both daily schedules that generate doses, so they share one lifecycle:
+ * - create → insert, then generate doses (one transaction);
+ * - edit → only while active; the new schedule applies from now, then future unrecorded doses are re-planned;
+ * - deactivate → keeps the first deactivation time, then future unrecorded doses are removed.
+ * Each kind supplies only its table access, validation and response shape.
+ */
+interface ScheduleSource<Row extends { id: string; active: boolean; deactivatedAt: Date | null }, Input, View> {
+  kind: "medication" | "routine";
+  /** URL segment, e.g. "medications". */
+  collection: string;
+  /** Route parameter name for one item, e.g. "medicationId". */
+  idParam: string;
+  /** Lower-case noun for messages, e.g. "medication". */
+  noun: string;
+  parse: (body: unknown) => Input;
+  toView: (row: Row) => View;
+  list: (db: Database, profileId: string) => Promise<Row[]>;
+  find: (db: Database, profileId: string, id: string) => Promise<Row | undefined>;
+  insert: (tx: Tx, values: Input & NewSourceFields) => Promise<Row>;
+  update: (tx: Tx, id: string, patch: SourcePatch<Input>) => Promise<Row>;
+}
+
+const MEDICATIONS: ScheduleSource<MedicationRow, ReturnType<typeof createMedicationSchema.parse>, Medication> = {
+  kind: "medication",
+  collection: "medications",
+  idParam: "medicationId",
+  noun: "medication",
+  parse: (body) => createMedicationSchema.parse(body),
+  toView: toMedication,
+  list: (db, profileId) => db.select().from(medications).where(eq(medications.profileId, profileId)).orderBy(asc(medications.name)),
+  find: async (db, profileId, id) => (await db.select().from(medications).where(and(eq(medications.id, id), eq(medications.profileId, profileId))))[0],
+  insert: async (tx, values) => (await tx.insert(medications).values(values).returning())[0]!,
+  update: async (tx, id, patch) => (await tx.update(medications).set(patch).where(eq(medications.id, id)).returning())[0]!,
+};
+
+const ROUTINES: ScheduleSource<RoutineRow, ReturnType<typeof createRoutineSchema.parse>, Routine> = {
+  kind: "routine",
+  collection: "routines",
+  idParam: "routineId",
+  noun: "routine",
+  parse: (body) => createRoutineSchema.parse(body),
+  toView: toRoutine,
+  list: (db, profileId) => db.select().from(routines).where(eq(routines.profileId, profileId)).orderBy(asc(routines.title)),
+  find: async (db, profileId, id) => (await db.select().from(routines).where(and(eq(routines.id, id), eq(routines.profileId, profileId))))[0],
+  insert: async (tx, values) => (await tx.insert(routines).values(values).returning())[0]!,
+  update: async (tx, id, patch) => (await tx.update(routines).set(patch).where(eq(routines.id, id)).returning())[0]!,
+};
+
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Registers list / create / edit / deactivate (and optionally get-one) for a schedule source. */
+function registerScheduleSource<Row extends { id: string; active: boolean; deactivatedAt: Date | null }, Input extends { endDate?: string | null }, View>(
+  router: Router,
+  db: Database,
+  team: RequestHandler[],
+  source: ScheduleSource<Row, Input, View>,
+  options: { getOne: boolean },
+) {
+  const collection = `/profiles/:profileId/${source.collection}`;
+  const item = `${collection}/:${source.idParam}`;
+
+  async function load(profileId: string, id: string): Promise<Row> {
+    const row = await source.find(db, profileId, id);
+    if (!row) throw new HttpError(404, "NOT_FOUND", `${capitalise(source.noun)} not found.`);
+    return row;
+  }
+  const itemId = (req: Request) => String(req.params[source.idParam]);
+
+  router.get(
+    collection,
+    ...team,
+    asyncHandler(async (req, res) => {
+      res.json((await source.list(db, ctx(req).profileId)).map(source.toView));
+    }),
+  );
+
+  if (options.getOne) {
+    router.get(
+      item,
+      ...team,
+      asyncHandler(async (req, res) => {
+        res.json(source.toView(await load(ctx(req).profileId, itemId(req))));
+      }),
+    );
+  }
+
+  router.post(
+    collection,
+    ...team,
+    asyncHandler(async (req, res) => {
+      const { profileId, userId } = ctx(req);
+      const input = source.parse(req.body);
+      const now = new Date();
+      const created = await db.transaction(async (tx) => {
+        const row = await source.insert(tx, { ...input, endDate: input.endDate ?? null, profileId, createdBy: userId, updatedBy: userId, scheduleEffectiveFrom: now });
+        await generateDosesForProfile(tx, profileId, now);
+        return row;
+      });
+      res.status(201).json(source.toView(created));
+    }),
+  );
+
+  router.put(
+    item,
+    ...team,
+    asyncHandler(async (req, res) => {
+      const { profileId, userId } = ctx(req);
+      const existing = await load(profileId, itemId(req));
+      if (!existing.active) throw new HttpError(409, "INACTIVE", `This ${source.noun} is no longer active.`);
+      const input = source.parse(req.body);
+      const now = new Date();
+      const updated = await db.transaction(async (tx) => {
+        const row = await source.update(tx, existing.id, { ...input, endDate: input.endDate ?? null, updatedBy: userId, updatedAt: now, scheduleEffectiveFrom: now });
+        await replanSource(tx, source.kind, existing.id, profileId, now);
+        return row;
+      });
+      res.json(source.toView(updated));
+    }),
+  );
+
+  router.post(
+    `${item}/deactivate`,
+    ...team,
+    asyncHandler(async (req, res) => {
+      const { profileId, userId } = ctx(req);
+      const existing = await load(profileId, itemId(req));
+      const now = new Date();
+      const updated = await db.transaction(async (tx) => {
+        const row = await source.update(tx, existing.id, { active: false, deactivatedAt: existing.deactivatedAt ?? now, updatedBy: userId, updatedAt: now });
+        await replanSource(tx, source.kind, existing.id, profileId, now); // removes future, unrecorded doses
+        return row;
+      });
+      res.json(source.toView(updated));
+    }),
+  );
+}
+
 export function carePlanRoutes(db: Database, auth: Auth): Router {
   const router = Router();
   const team = [requireSession(auth, db), requireMember(db, CARE_TEAM)];
   const base = "/profiles/:profileId";
 
-  /* ----------------------------- Medications ----------------------------- */
-
-  router.get(
-    `${base}/medications`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const rows = await db
-        .select()
-        .from(medications)
-        .where(eq(medications.profileId, ctx(req).profileId))
-        .orderBy(asc(medications.name));
-      res.json(rows.map(toMedication));
-    }),
-  );
-
-  async function loadMedication(profileId: string, id: string) {
-    const [m] = await db
-      .select()
-      .from(medications)
-      .where(and(eq(medications.id, id), eq(medications.profileId, profileId)));
-    if (!m) throw new HttpError(404, "NOT_FOUND", "Medication not found.");
-    return m;
-  }
-
-  router.get(
-    `${base}/medications/:medicationId`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      res.json(toMedication(await loadMedication(ctx(req).profileId, String(req.params.medicationId))));
-    }),
-  );
-
-  router.post(
-    `${base}/medications`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const { profileId, userId } = ctx(req);
-      const input = createMedicationSchema.parse(req.body);
-      const now = new Date();
-      const created = await db.transaction(async (tx) => {
-        const [m] = await tx
-          .insert(medications)
-          .values({ ...input, endDate: input.endDate ?? null, profileId, createdBy: userId, updatedBy: userId, scheduleEffectiveFrom: now })
-          .returning();
-        await generateDosesForProfile(tx, profileId, now);
-        return m!;
-      });
-      res.status(201).json(toMedication(created));
-    }),
-  );
-
-  router.put(
-    `${base}/medications/:medicationId`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const { profileId, userId } = ctx(req);
-      const existing = await loadMedication(profileId, String(req.params.medicationId));
-      if (!existing.active) throw new HttpError(409, "INACTIVE", "This medication is no longer active.");
-      const input = createMedicationSchema.parse(req.body);
-      const now = new Date();
-      const updated = await db.transaction(async (tx) => {
-        const [m] = await tx
-          .update(medications)
-          .set({ ...input, endDate: input.endDate ?? null, updatedBy: userId, updatedAt: now, scheduleEffectiveFrom: now })
-          .where(eq(medications.id, existing.id))
-          .returning();
-        await replanSource(tx, "medication", existing.id, profileId, now);
-        return m!;
-      });
-      res.json(toMedication(updated));
-    }),
-  );
-
-  router.post(
-    `${base}/medications/:medicationId/deactivate`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const { profileId, userId } = ctx(req);
-      const existing = await loadMedication(profileId, String(req.params.medicationId));
-      const now = new Date();
-      const updated = await db.transaction(async (tx) => {
-        const [m] = await tx
-          .update(medications)
-          .set({ active: false, deactivatedAt: existing.deactivatedAt ?? now, updatedBy: userId, updatedAt: now })
-          .where(eq(medications.id, existing.id))
-          .returning();
-        await replanSource(tx, "medication", existing.id, profileId, now); // removes future, unrecorded doses
-        return m!;
-      });
-      res.json(toMedication(updated));
-    }),
-  );
-
-  /* ------------------------------- Routines ------------------------------- */
-
-  router.get(
-    `${base}/routines`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const rows = await db
-        .select()
-        .from(routines)
-        .where(eq(routines.profileId, ctx(req).profileId))
-        .orderBy(asc(routines.title));
-      res.json(rows.map(toRoutine));
-    }),
-  );
-
-  async function loadRoutine(profileId: string, id: string) {
-    const [r] = await db
-      .select()
-      .from(routines)
-      .where(and(eq(routines.id, id), eq(routines.profileId, profileId)));
-    if (!r) throw new HttpError(404, "NOT_FOUND", "Routine not found.");
-    return r;
-  }
-
-  router.post(
-    `${base}/routines`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const { profileId, userId } = ctx(req);
-      const input = createRoutineSchema.parse(req.body);
-      const now = new Date();
-      const created = await db.transaction(async (tx) => {
-        const [r] = await tx
-          .insert(routines)
-          .values({ ...input, endDate: input.endDate ?? null, profileId, createdBy: userId, updatedBy: userId, scheduleEffectiveFrom: now })
-          .returning();
-        await generateDosesForProfile(tx, profileId, now);
-        return r!;
-      });
-      res.status(201).json(toRoutine(created));
-    }),
-  );
-
-  router.put(
-    `${base}/routines/:routineId`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const { profileId, userId } = ctx(req);
-      const existing = await loadRoutine(profileId, String(req.params.routineId));
-      if (!existing.active) throw new HttpError(409, "INACTIVE", "This routine is no longer active.");
-      const input = createRoutineSchema.parse(req.body);
-      const now = new Date();
-      const updated = await db.transaction(async (tx) => {
-        const [r] = await tx
-          .update(routines)
-          .set({ ...input, endDate: input.endDate ?? null, updatedBy: userId, updatedAt: now, scheduleEffectiveFrom: now })
-          .where(eq(routines.id, existing.id))
-          .returning();
-        await replanSource(tx, "routine", existing.id, profileId, now);
-        return r!;
-      });
-      res.json(toRoutine(updated));
-    }),
-  );
-
-  router.post(
-    `${base}/routines/:routineId/deactivate`,
-    ...team,
-    asyncHandler(async (req, res) => {
-      const { profileId, userId } = ctx(req);
-      const existing = await loadRoutine(profileId, String(req.params.routineId));
-      const now = new Date();
-      const updated = await db.transaction(async (tx) => {
-        const [r] = await tx
-          .update(routines)
-          .set({ active: false, deactivatedAt: existing.deactivatedAt ?? now, updatedBy: userId, updatedAt: now })
-          .where(eq(routines.id, existing.id))
-          .returning();
-        await replanSource(tx, "routine", existing.id, profileId, now);
-        return r!;
-      });
-      res.json(toRoutine(updated));
-    }),
-  );
+  registerScheduleSource(router, db, team, MEDICATIONS, { getOne: true });
+  registerScheduleSource(router, db, team, ROUTINES, { getOne: false });
 
   /* ------------------------------- Schedule ------------------------------- */
 

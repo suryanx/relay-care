@@ -304,7 +304,7 @@ export const doseEvents = pgTable(
 export const HELP_STATUSES = ["open", "acknowledged", "resolved"] as const;
 export type HelpStatus = (typeof HELP_STATUSES)[number];
 
-/** "I need help" requests from the elder. Notification/follow-up arrives in Checkpoint 5. */
+/** "I need help" requests from the elder. Each opens a follow-up and alerts the care team. */
 export const helpRequests = pgTable(
   "help_requests",
   {

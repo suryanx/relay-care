@@ -213,6 +213,36 @@ describe("care plan", () => {
       expect(deactivated.body.active).toBe(false);
     });
 
+    it("follows the same lifecycle rules as medicines, with routine wording and API surface", async () => {
+      const created = await admin.agent
+        .post(`/api/profiles/${profileId}/routines`)
+        .send({ title: "Evening stretch", times: ["18:00"], startDate: localToday() });
+      const id = created.body.id;
+
+      // Deactivating twice keeps the first deactivation and never re-activates.
+      const first = await admin.agent.post(`/api/profiles/${profileId}/routines/${id}/deactivate`).send({});
+      const again = await admin.agent.post(`/api/profiles/${profileId}/routines/${id}/deactivate`).send({});
+      expect(again.status).toBe(200);
+      expect(again.body.active).toBe(false);
+      expect(first.body.active).toBe(false);
+
+      // Its future doses are gone from the schedule.
+      const sched = await admin.agent.get(`/api/profiles/${profileId}/schedule`).query({ date: localTomorrow() });
+      expect(sched.body.items.some((i: { label: string }) => i.label === "Evening stretch")).toBe(false);
+
+      const edit = await admin.agent.put(`/api/profiles/${profileId}/routines/${id}`).send({ title: "x", times: ["09:00"], startDate: localToday() });
+      expect(edit.status).toBe(409);
+      expect(edit.body.error).toMatchObject({ code: "INACTIVE", message: "This routine is no longer active." });
+
+      const missing = await admin.agent.put(`/api/profiles/${profileId}/routines/does-not-exist`).send({ title: "x", times: ["09:00"], startDate: localToday() });
+      expect(missing.status).toBe(404);
+      expect(missing.body.error.message).toBe("Routine not found.");
+
+      // Routines have no single-item GET (unlike medicines); that route stays absent.
+      expect((await admin.agent.get(`/api/profiles/${profileId}/routines/${id}`)).status).toBe(404);
+      expect((await admin.agent.get(`/api/profiles/${profileId}/medications/does-not-exist`)).body.error.message).toBe("Medication not found.");
+    });
+
     it("validates routine input", async () => {
       const res = await admin.agent.post(`/api/profiles/${profileId}/routines`).send({ title: " ", times: [], startDate: "x" });
       expect(res.status).toBe(400);

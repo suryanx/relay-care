@@ -247,7 +247,7 @@ export async function applyDoseAction(
 
 /**
  * System transition: marks overdue Scheduled medication doses as Unconfirmed.
- * Idempotent and safe to run concurrently with confirmations (the Checkpoint 4 scheduler reuses it).
+ * Idempotent and safe to run concurrently with confirmations (the notification sweep reuses it).
  * Returns the ids that changed.
  */
 export async function markOverdueUnconfirmed(db: Database, now: Date = new Date(), profileId?: string): Promise<string[]> {

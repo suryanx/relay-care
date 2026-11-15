@@ -14,12 +14,14 @@ import {
   sweepLocks,
   sweepRuns,
   user,
+  type DoseStatus,
   type NotificationStatus,
   type NotificationType,
 } from "../db/schema.js";
 import { ConsoleEmailProvider } from "../email/console.js";
 import { EmailSendError, type EmailProvider } from "../email/types.js";
 import { markOverdueUnconfirmed } from "./adherence.js";
+import { buildEmail, renderContent, storedSummary, type Content } from "./notificationContent.js";
 import { purgeExpiredSandboxes } from "./demoSandbox.js";
 import { syncIncidents } from "./incidents.js";
 import { generateDosesForProfile } from "./schedule.js";
@@ -48,6 +50,7 @@ export const STUCK_SENDING_MINUTES = 10;
 export const SWEEP_LOCK_SECONDS = 120;
 export const MANUAL_SWEEP_COOLDOWN_SECONDS = 30;
 const MIN = 60_000;
+const DAY = 24 * 60 * MIN;
 
 export function previewConfig(appUrl: string): NotifierConfig {
   return {
@@ -59,6 +62,9 @@ export function previewConfig(appUrl: string): NotifierConfig {
     appUrl,
   };
 }
+
+/** Preview mode renders through the console provider with a silent logger: nothing leaves the server. */
+const PREVIEW_PROVIDER = new ConsoleEmailProvider(() => {});
 
 const isExternal = (cfg: NotifierConfig) => cfg.realSendEnabled && cfg.provider.name !== "console";
 
@@ -89,7 +95,7 @@ export function maskEmail(email: string | null | undefined): string {
 type Pref = "notifyDoseReminders" | "notifyAlerts" | "notifyAppointments";
 
 /**
- * Deterministic recipient rules (Checkpoint 4):
+ * Deterministic recipient rules:
  * - Never elder accounts (they have no real email address).
  * - Never placeholder addresses (*.invalid).
  * - Unconfirmed / Not Taken / help alerts → administrators and caregivers who keep alerts on
@@ -115,141 +121,110 @@ const PREF_FOR: Record<NotificationType, { pref: Pref; roles: ("admin" | "caregi
 };
 
 /* ------------------------------------------------------------------ */
-/* Content (non-clinical: no medicine names, no dosing advice)         */
-/* ------------------------------------------------------------------ */
-
-interface Content {
-  subject: string;
-  text: string;
-}
-
-const FOOTER = "Relay helps families stay in touch. It does not give medical advice and does not replace a doctor, pharmacist or emergency services.";
-
-function render(type: NotificationType, v: { name: string; time?: string; date?: string; link: string; reporter?: string }): Content {
-  switch (type) {
-    case "dose_reminder":
-      return {
-        subject: `Medicine reminder: ${v.name} at ${v.time}`,
-        text: `${v.name} has a medicine scheduled for ${v.time} today.\n\nOpen Relay to see the details: ${v.link}`,
-      };
-    case "dose_snooze_reminder":
-      return {
-        subject: `Reminder again: ${v.name}'s ${v.time} medicine`,
-        text: `${v.name} asked to be reminded again about the medicine scheduled for ${v.time}. The scheduled time has not changed.\n\nOpen Relay: ${v.link}`,
-      };
-    case "dose_unconfirmed":
-      return {
-        subject: `Unconfirmed: ${v.name}'s ${v.time} medicine`,
-        text: `No one has confirmed yet whether ${v.name} took the medicine scheduled for ${v.time}. Unconfirmed does not mean missed — it has simply not been confirmed. You may want to check in.\n\nRecord what happened in Relay: ${v.link}`,
-      };
-    case "dose_not_taken":
-      return {
-        subject: `Reported not taken: ${v.name}'s ${v.time} medicine`,
-        text: `${v.reporter ?? "Someone"} reported in Relay that the medicine scheduled for ${v.time} was not taken. This was reported, not assumed. If you are unsure what to do, please ask the pharmacist or doctor.\n\nOpen Relay: ${v.link}`,
-      };
-    case "appointment_reminder":
-      return {
-        subject: `Appointment reminder: ${v.name}, ${v.date} at ${v.time}`,
-        text: `${v.name} has a doctor's appointment on ${v.date} at ${v.time}.\n\nSee the details in Relay: ${v.link}`,
-      };
-    case "help_request":
-      return {
-        subject: `${v.name} asked for help in Relay`,
-        text: `${v.name} pressed "I need help" in Relay. Please check in with them. If this could be an emergency, contact local emergency services.\n\nOpen Relay: ${v.link}`,
-      };
-  }
-}
-
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-const toHtml = (text: string) =>
-  `${text
-    .split("\n\n")
-    .map((p) => `<p>${escapeHtml(p)}</p>`)
-    .join("")}<p style="color:#666;font-size:12px">${escapeHtml(FOOTER)}</p>`;
-
-const previewOf = (c: Content) => c.text.split("\n\n")[0]!.slice(0, 240);
-
-/* ------------------------------------------------------------------ */
 /* Relevance — re-checked at send time so stale alerts never go out    */
 /* ------------------------------------------------------------------ */
 
 type NotificationRow = typeof notifications.$inferSelect;
+type ProfileRow = typeof profiles.$inferSelect;
 type Relevance = { ok: true; content: Content; email: string } | { ok: false; status: "cancelled" | "failed"; reason: string };
+/** A notification's subject either still warrants this email (with its wording) or is stale for a reason. */
+type SubjectCheck = { content: Content } | { stale: string };
 
-export async function checkRelevance(db: Database, n: NotificationRow, cfg: NotifierConfig, now: Date): Promise<Relevance> {
-  if (now > n.expiresAt) return { ok: false, status: "cancelled", reason: "expired" };
-  const [p] = await db.select().from(profiles).where(eq(profiles.id, n.profileId));
-  if (!p) return { ok: false, status: "cancelled", reason: "profile_removed" };
-  if (p.archivedAt) return { ok: false, status: "cancelled", reason: "profile_archived" };
+const cancelled = (reason: string): Relevance => ({ ok: false, status: "cancelled", reason });
 
-  // Recipient must still be an eligible member with the preference on.
-  const rule = PREF_FOR[n.type];
-  if (!n.recipientUserId || !(await recipients(db, n.profileId, rule.pref, rule.roles)).includes(n.recipientUserId)) {
-    return { ok: false, status: "cancelled", reason: "recipient_not_eligible" };
+/** Alerts that double as a follow-up notice: pointless once someone is handling it or it is closed. */
+const FOLLOW_UP_ALERTS: ReadonlySet<NotificationType> = new Set(["dose_unconfirmed", "dose_not_taken", "help_request"]);
+
+/**
+ * Pure rule: why a dose notification is no longer worth sending, or null if it still is.
+ * Each type is only valid while the dose is still in the state that triggered it.
+ */
+export function staleDoseReason(type: NotificationType, dose: { status: DoseStatus; snoozeCount: number }): string | null {
+  switch (type) {
+    case "dose_reminder":
+      if (dose.status !== "scheduled") return `dose_${dose.status}`;
+      return dose.snoozeCount > 0 ? "superseded_by_snooze" : null;
+    case "dose_snooze_reminder":
+      return dose.status === "scheduled" ? null : `dose_${dose.status}`;
+    case "dose_unconfirmed":
+      return dose.status === "unconfirmed" ? null : `now_${dose.status}`;
+    case "dose_not_taken":
+      return dose.status === "not_taken" ? null : `corrected_to_${dose.status}`;
+    default:
+      return null;
   }
-  const [r] = await db.select({ email: user.email }).from(user).where(eq(user.id, n.recipientUserId));
+}
+
+async function isEligibleRecipient(db: Database, n: NotificationRow): Promise<boolean> {
+  if (!n.recipientUserId) return false;
+  const rule = PREF_FOR[n.type];
+  return (await recipients(db, n.profileId, rule.pref, rule.roles)).includes(n.recipientUserId);
+}
+
+/** The status of the follow-up this alert announces, if it is no longer open. */
+async function handledFollowUpStatus(db: Database, n: NotificationRow): Promise<string | null> {
+  const sourceId = n.doseId ?? n.helpRequestId;
+  if (!FOLLOW_UP_ALERTS.has(n.type) || !sourceId) return null;
+  const [inc] = await db.select({ status: incidents.status }).from(incidents).where(eq(incidents.dedupeKey, `${n.type}:${sourceId}`));
+  return inc && inc.status !== "open" ? inc.status : null;
+}
+
+async function checkDose(db: Database, n: NotificationRow, doseId: string, p: ProfileRow, appUrl: string): Promise<SubjectCheck> {
+  const [d] = await db.select().from(doses).where(and(eq(doses.id, doseId), eq(doses.profileId, n.profileId)));
+  if (!d) return { stale: "dose_removed" };
+  const stale = staleDoseReason(n.type, d);
+  if (stale) return { stale };
+  let reporter: string | undefined;
+  if (n.type === "dose_not_taken" && d.outcomeRecordedBy) {
+    const [u] = await db.select({ name: user.name }).from(user).where(eq(user.id, d.outcomeRecordedBy));
+    reporter = u?.name;
+  }
+  return { content: renderContent(n.type, { name: p.preferredName, time: d.localTime, link: `${appUrl}/profiles/${p.id}/schedule`, reporter }) };
+}
+
+async function checkAppointment(db: Database, n: NotificationRow, appointmentId: string, p: ProfileRow, appUrl: string): Promise<SubjectCheck> {
+  const [a] = await db.select().from(appointments).where(and(eq(appointments.id, appointmentId), eq(appointments.profileId, n.profileId)));
+  if (!a || a.status !== "scheduled") return { stale: "appointment_cancelled" };
+  // expiresAt was set to the start time when queued; a moved appointment gets a new dedupe key.
+  if (a.startsAt.getTime() !== n.expiresAt.getTime()) return { stale: "appointment_rescheduled" };
+  const local = DateTime.fromJSDate(a.startsAt, { zone: p.timezone });
+  return {
+    content: renderContent(n.type, { name: p.preferredName, date: local.toFormat("ccc d LLL"), time: local.toFormat("HH:mm"), link: `${appUrl}/profiles/${p.id}/appointments` }),
+  };
+}
+
+async function checkHelpRequest(db: Database, n: NotificationRow, helpRequestId: string, p: ProfileRow, appUrl: string): Promise<SubjectCheck> {
+  const [h] = await db.select().from(helpRequests).where(eq(helpRequests.id, helpRequestId));
+  if (!h || h.status === "resolved") return { stale: "help_resolved" };
+  return { content: renderContent(n.type, { name: p.preferredName, link: `${appUrl}/profiles/${p.id}` }) };
+}
+
+function checkSubject(db: Database, n: NotificationRow, p: ProfileRow, appUrl: string): Promise<SubjectCheck> {
+  if (n.doseId) return checkDose(db, n, n.doseId, p, appUrl);
+  if (n.appointmentId) return checkAppointment(db, n, n.appointmentId, p, appUrl);
+  if (n.helpRequestId) return checkHelpRequest(db, n, n.helpRequestId, p, appUrl);
+  return Promise.resolve({ stale: "unknown_subject" });
+}
+
+/**
+ * Decides at send time whether a queued notification should still go out, and renders it if so.
+ * Checks run in order: expiry → profile → recipient → follow-up already handled → subject still current.
+ */
+export async function checkRelevance(db: Database, n: NotificationRow, cfg: NotifierConfig, now: Date): Promise<Relevance> {
+  if (now > n.expiresAt) return cancelled("expired");
+  const [p] = await db.select().from(profiles).where(eq(profiles.id, n.profileId));
+  if (!p) return cancelled("profile_removed");
+  if (p.archivedAt) return cancelled("profile_archived");
+
+  if (!(await isEligibleRecipient(db, n))) return cancelled("recipient_not_eligible");
+  const [r] = await db.select({ email: user.email }).from(user).where(eq(user.id, n.recipientUserId!));
   if (!r?.email) return { ok: false, status: "failed", reason: "no_valid_email" };
 
-  const name = p.preferredName;
-  const local = (d: Date) => DateTime.fromJSDate(d, { zone: p.timezone });
+  const handled = await handledFollowUpStatus(db, n);
+  if (handled) return cancelled(`incident_${handled}`);
 
-  // Alerts that announce a follow-up are pointless once someone is handling it or it is closed.
-  if (n.type === "dose_unconfirmed" || n.type === "dose_not_taken" || n.type === "help_request") {
-    const sourceId = n.doseId ?? n.helpRequestId;
-    if (sourceId) {
-      const [inc] = await db.select({ status: incidents.status }).from(incidents).where(eq(incidents.dedupeKey, `${n.type}:${sourceId}`));
-      if (inc && inc.status !== "open") return { ok: false, status: "cancelled", reason: `incident_${inc.status}` };
-    }
-  }
-
-  if (n.doseId) {
-    const [d] = await db.select().from(doses).where(and(eq(doses.id, n.doseId), eq(doses.profileId, n.profileId)));
-    if (!d) return { ok: false, status: "cancelled", reason: "dose_removed" };
-    const link = `${cfg.appUrl}/profiles/${p.id}/schedule`;
-    const time = d.localTime;
-    switch (n.type) {
-      case "dose_reminder":
-        if (d.status !== "scheduled") return { ok: false, status: "cancelled", reason: `dose_${d.status}` };
-        if (d.snoozeCount > 0) return { ok: false, status: "cancelled", reason: "superseded_by_snooze" };
-        break;
-      case "dose_snooze_reminder":
-        if (d.status !== "scheduled") return { ok: false, status: "cancelled", reason: `dose_${d.status}` };
-        break;
-      case "dose_unconfirmed":
-        if (d.status !== "unconfirmed") return { ok: false, status: "cancelled", reason: `now_${d.status}` };
-        break;
-      case "dose_not_taken":
-        if (d.status !== "not_taken") return { ok: false, status: "cancelled", reason: `corrected_to_${d.status}` };
-        break;
-    }
-    let reporter: string | undefined;
-    if (n.type === "dose_not_taken" && d.outcomeRecordedBy) {
-      const [u] = await db.select({ name: user.name }).from(user).where(eq(user.id, d.outcomeRecordedBy));
-      reporter = u?.name;
-    }
-    return { ok: true, email: r.email, content: render(n.type, { name, time, link, reporter }) };
-  }
-
-  if (n.appointmentId) {
-    const [a] = await db.select().from(appointments).where(and(eq(appointments.id, n.appointmentId), eq(appointments.profileId, n.profileId)));
-    if (!a || a.status !== "scheduled") return { ok: false, status: "cancelled", reason: "appointment_cancelled" };
-    // expiresAt was set to the start time when queued; a moved appointment gets a new dedupe key.
-    if (a.startsAt.getTime() !== n.expiresAt.getTime()) return { ok: false, status: "cancelled", reason: "appointment_rescheduled" };
-    const l = local(a.startsAt);
-    return {
-      ok: true,
-      email: r.email,
-      content: render(n.type, { name, date: l.toFormat("ccc d LLL"), time: l.toFormat("HH:mm"), link: `${cfg.appUrl}/profiles/${p.id}/appointments` }),
-    };
-  }
-
-  if (n.helpRequestId) {
-    const [h] = await db.select().from(helpRequests).where(eq(helpRequests.id, n.helpRequestId));
-    if (!h || h.status === "resolved") return { ok: false, status: "cancelled", reason: "help_resolved" };
-    return { ok: true, email: r.email, content: render(n.type, { name, link: `${cfg.appUrl}/profiles/${p.id}` }) };
-  }
-
-  return { ok: false, status: "cancelled", reason: "unknown_subject" };
+  const subject = await checkSubject(db, n, p, cfg.appUrl);
+  return "stale" in subject ? cancelled(subject.stale) : { ok: true, email: r.email, content: subject.content };
 }
 
 /* ------------------------------------------------------------------ */
@@ -267,149 +242,163 @@ interface Candidate {
   helpRequestId?: string;
 }
 
-export async function queueDueNotifications(db: Database, now: Date, profileId?: string): Promise<number> {
-  const scope = <T extends { profileId: typeof doses.profileId | typeof appointments.profileId | typeof helpRequests.profileId }>(t: T) =>
-    profileId ? eq(t.profileId, profileId) : undefined;
-  const dayAgo = new Date(now.getTime() - 24 * 60 * MIN);
-  const candidates: Candidate[] = [];
+/** The time window and optional profile a queueing pass looks at. */
+interface QueueWindow {
+  now: Date;
+  dayAgo: Date;
+  profileId?: string;
+}
 
-  // a) Upcoming-dose reminders: reminder time reached, still within grace, not snoozed, active medicine.
-  const upcoming = await db
+const inScope = (column: typeof doses.profileId | typeof appointments.profileId | typeof helpRequests.profileId, w: QueueWindow) =>
+  w.profileId ? eq(column, w.profileId) : undefined;
+
+/** a) Upcoming-dose reminders: reminder time reached, still within grace, not snoozed, active medicine. */
+async function doseReminderCandidates(db: Database, w: QueueWindow): Promise<Candidate[]> {
+  const rows = await db
     .select({ id: doses.id, profileId: doses.profileId, scheduledAt: doses.scheduledAt, lead: medications.reminderLeadMinutes, grace: profiles.graceMinutes })
     .from(doses)
     .innerJoin(medications, eq(medications.id, doses.medicationId))
     .innerJoin(profiles, eq(profiles.id, doses.profileId))
     .where(
       and(
-        scope(doses),
+        inScope(doses.profileId, w),
         eq(doses.kind, "medication"),
         eq(doses.status, "scheduled"),
         eq(doses.snoozeCount, 0),
         eq(medications.active, true),
-        gte(doses.scheduledAt, dayAgo),
-        lte(sql`${doses.scheduledAt} - make_interval(mins => ${medications.reminderLeadMinutes})`, now),
-        gt(sql`${doses.scheduledAt} + make_interval(mins => ${profiles.graceMinutes})`, now),
+        gte(doses.scheduledAt, w.dayAgo),
+        lte(sql`${doses.scheduledAt} - make_interval(mins => ${medications.reminderLeadMinutes})`, w.now),
+        gt(sql`${doses.scheduledAt} + make_interval(mins => ${profiles.graceMinutes})`, w.now),
       ),
     );
-  for (const d of upcoming) {
-    candidates.push({
-      type: "dose_reminder",
-      profileId: d.profileId,
-      key: `dose_reminder:${d.id}`,
-      dueAt: new Date(d.scheduledAt.getTime() - d.lead * MIN),
-      expiresAt: new Date(d.scheduledAt.getTime() + d.grace * MIN),
-      doseId: d.id,
-    });
-  }
+  return rows.map((d) => ({
+    type: "dose_reminder",
+    profileId: d.profileId,
+    key: `dose_reminder:${d.id}`,
+    dueAt: new Date(d.scheduledAt.getTime() - d.lead * MIN),
+    expiresAt: new Date(d.scheduledAt.getTime() + d.grace * MIN),
+    doseId: d.id,
+  }));
+}
 
-  // b) "Remind me later" follow-ups, due when the snooze ends.
-  const snoozed = await db
+/** b) "Remind me later" follow-ups, due when the snooze ends. One per snooze (the count is in the key). */
+async function snoozeReminderCandidates(db: Database, w: QueueWindow): Promise<Candidate[]> {
+  const rows = await db
     .select({ id: doses.id, profileId: doses.profileId, snoozeUntil: doses.snoozeUntil, count: doses.snoozeCount })
     .from(doses)
     .innerJoin(medications, eq(medications.id, doses.medicationId))
     .where(
       and(
-        scope(doses),
+        inScope(doses.profileId, w),
         eq(doses.kind, "medication"),
         eq(doses.status, "scheduled"),
         eq(medications.active, true),
         gt(doses.snoozeCount, 0),
         isNotNull(doses.snoozeUntil),
-        lte(doses.snoozeUntil, now),
-        gt(doses.snoozeUntil, new Date(now.getTime() - 30 * MIN)),
+        lte(doses.snoozeUntil, w.now),
+        gt(doses.snoozeUntil, new Date(w.now.getTime() - 30 * MIN)),
       ),
     );
-  for (const d of snoozed) {
-    candidates.push({
-      type: "dose_snooze_reminder",
-      profileId: d.profileId,
-      key: `dose_snooze_reminder:${d.id}:${d.count}`,
-      dueAt: d.snoozeUntil!,
-      expiresAt: new Date(d.snoozeUntil!.getTime() + 30 * MIN),
-      doseId: d.id,
-    });
-  }
+  return rows.map((d) => ({
+    type: "dose_snooze_reminder",
+    profileId: d.profileId,
+    key: `dose_snooze_reminder:${d.id}:${d.count}`,
+    dueAt: d.snoozeUntil!,
+    expiresAt: new Date(d.snoozeUntil!.getTime() + 30 * MIN),
+    doseId: d.id,
+  }));
+}
 
-  // c) Unconfirmed alerts (the adherence engine already moved the dose; we only notify).
-  const unconfirmed = await db
+/** c) Unconfirmed alerts. The adherence engine already moved the dose; this only notifies. */
+async function unconfirmedCandidates(db: Database, w: QueueWindow): Promise<Candidate[]> {
+  const rows = await db
     .select({ id: doses.id, profileId: doses.profileId, scheduledAt: doses.scheduledAt })
     .from(doses)
-    .where(and(scope(doses), eq(doses.kind, "medication"), eq(doses.status, "unconfirmed"), gte(doses.scheduledAt, dayAgo)));
-  for (const d of unconfirmed) {
-    candidates.push({
-      type: "dose_unconfirmed",
-      profileId: d.profileId,
-      key: `dose_unconfirmed:${d.id}`,
-      dueAt: now,
-      expiresAt: new Date(d.scheduledAt.getTime() + 24 * 60 * MIN),
-      doseId: d.id,
-    });
-  }
+    .where(and(inScope(doses.profileId, w), eq(doses.kind, "medication"), eq(doses.status, "unconfirmed"), gte(doses.scheduledAt, w.dayAgo)));
+  return rows.map((d) => ({
+    type: "dose_unconfirmed",
+    profileId: d.profileId,
+    key: `dose_unconfirmed:${d.id}`,
+    dueAt: w.now,
+    expiresAt: new Date(d.scheduledAt.getTime() + DAY),
+    doseId: d.id,
+  }));
+}
 
-  // d) Explicitly reported Not Taken.
-  const notTaken = await db
+/** d) Explicitly reported Not Taken. */
+async function notTakenCandidates(db: Database, w: QueueWindow): Promise<Candidate[]> {
+  const rows = await db
     .select({ id: doses.id, profileId: doses.profileId, at: doses.outcomeRecordedAt })
     .from(doses)
-    .where(and(scope(doses), eq(doses.kind, "medication"), eq(doses.status, "not_taken"), gte(doses.outcomeRecordedAt, dayAgo)));
-  for (const d of notTaken) {
-    candidates.push({
-      type: "dose_not_taken",
-      profileId: d.profileId,
-      key: `dose_not_taken:${d.id}`,
-      dueAt: now,
-      expiresAt: new Date(d.at!.getTime() + 24 * 60 * MIN),
-      doseId: d.id,
-    });
-  }
+    .where(and(inScope(doses.profileId, w), eq(doses.kind, "medication"), eq(doses.status, "not_taken"), gte(doses.outcomeRecordedAt, w.dayAgo)));
+  return rows.map((d) => ({
+    type: "dose_not_taken",
+    profileId: d.profileId,
+    key: `dose_not_taken:${d.id}`,
+    dueAt: w.now,
+    expiresAt: new Date(d.at!.getTime() + DAY),
+    doseId: d.id,
+  }));
+}
 
-  // e) Appointment reminders: within the reminder window, still in the future, not cancelled.
-  const appts = await db
+/** e) Appointment reminders: within the reminder window, still in the future, not cancelled. */
+async function appointmentCandidates(db: Database, w: QueueWindow): Promise<Candidate[]> {
+  const rows = await db
     .select({ id: appointments.id, profileId: appointments.profileId, startsAt: appointments.startsAt, hours: appointments.reminderHoursBefore })
     .from(appointments)
     .where(
       and(
-        scope(appointments),
+        inScope(appointments.profileId, w),
         eq(appointments.status, "scheduled"),
-        gt(appointments.startsAt, now),
-        lte(sql`${appointments.startsAt} - make_interval(hours => ${appointments.reminderHoursBefore})`, now),
+        gt(appointments.startsAt, w.now),
+        lte(sql`${appointments.startsAt} - make_interval(hours => ${appointments.reminderHoursBefore})`, w.now),
       ),
     );
-  for (const a of appts) {
-    candidates.push({
-      type: "appointment_reminder",
-      profileId: a.profileId,
-      // The start time is part of the key: rescheduling creates a new reminder; the old one is cancelled at send time.
-      key: `appointment_reminder:${a.id}:${a.startsAt.toISOString()}`,
-      dueAt: new Date(a.startsAt.getTime() - a.hours * 60 * MIN),
-      expiresAt: a.startsAt,
-      appointmentId: a.id,
-    });
-  }
+  return rows.map((a) => ({
+    type: "appointment_reminder",
+    profileId: a.profileId,
+    // The start time is part of the key: rescheduling creates a new reminder; the old one is cancelled at send time.
+    key: `appointment_reminder:${a.id}:${a.startsAt.toISOString()}`,
+    dueAt: new Date(a.startsAt.getTime() - a.hours * 60 * MIN),
+    expiresAt: a.startsAt,
+    appointmentId: a.id,
+  }));
+}
 
-  // f) Help requests (simple alert to administrators; full follow-up is Checkpoint 5).
-  const help = await db
+/** f) Open help requests from the last day. */
+async function helpRequestCandidates(db: Database, w: QueueWindow): Promise<Candidate[]> {
+  const rows = await db
     .select({ id: helpRequests.id, profileId: helpRequests.profileId, createdAt: helpRequests.createdAt })
     .from(helpRequests)
-    .where(and(scope(helpRequests), eq(helpRequests.status, "open"), gte(helpRequests.createdAt, dayAgo)));
-  for (const h of help) {
-    candidates.push({
-      type: "help_request",
-      profileId: h.profileId,
-      key: `help_request:${h.id}`,
-      dueAt: h.createdAt,
-      expiresAt: new Date(h.createdAt.getTime() + 24 * 60 * MIN),
-      helpRequestId: h.id,
-    });
-  }
+    .where(and(inScope(helpRequests.profileId, w), eq(helpRequests.status, "open"), gte(helpRequests.createdAt, w.dayAgo)));
+  return rows.map((h) => ({
+    type: "help_request",
+    profileId: h.profileId,
+    key: `help_request:${h.id}`,
+    dueAt: h.createdAt,
+    expiresAt: new Date(h.createdAt.getTime() + DAY),
+    helpRequestId: h.id,
+  }));
+}
 
-  // Fan out to recipients (cached per profile + rule) and insert idempotently.
+const CANDIDATE_SOURCES = [
+  doseReminderCandidates,
+  snoozeReminderCandidates,
+  unconfirmedCandidates,
+  notTakenCandidates,
+  appointmentCandidates,
+  helpRequestCandidates,
+] as const;
+
+/** One outbox row per (candidate, eligible recipient). Recipients are looked up once per profile and type. */
+async function fanOut(db: Database, candidates: Candidate[], now: Date): Promise<(typeof notifications.$inferInsert)[]> {
   const recipientCache = new Map<string, string[]>();
   const rows: (typeof notifications.$inferInsert)[] = [];
   for (const c of candidates) {
-    const rule = PREF_FOR[c.type];
     const cacheKey = `${c.profileId}:${c.type}`;
     let to = recipientCache.get(cacheKey);
     if (!to) {
+      const rule = PREF_FOR[c.type];
       to = await recipients(db, c.profileId, rule.pref, rule.roles);
       recipientCache.set(cacheKey, to);
     }
@@ -432,6 +421,16 @@ export async function queueDueNotifications(db: Database, now: Date, profileId?:
       });
     }
   }
+  return rows;
+}
+
+/** Finds everything due and inserts it into the outbox. Idempotent: the dedupe key makes repeats no-ops. */
+export async function queueDueNotifications(db: Database, now: Date, profileId?: string): Promise<number> {
+  const w: QueueWindow = { now, dayAgo: new Date(now.getTime() - DAY), profileId };
+  const candidates: Candidate[] = [];
+  for (const collect of CANDIDATE_SOURCES) candidates.push(...(await collect(db, w)));
+
+  const rows = await fanOut(db, candidates, now);
   if (rows.length === 0) return 0;
   const inserted = await db.insert(notifications).values(rows).onConflictDoNothing({ target: notifications.dedupeKey }).returning({ id: notifications.id });
   return inserted.length;
@@ -507,81 +506,94 @@ async function finish(db: Database, id: string, patch: Partial<typeof notificati
     .where(and(eq(notifications.id, id), eq(notifications.status, "sending")));
 }
 
+/** Pure policy for a failed provider call. */
+export type SendFailureDecision = { status: "queued"; retryInMinutes: number } | { status: "failed" } | { status: "uncertain" };
+
+/**
+ * - The provider answered with an error status: it was NOT accepted. 429/5xx are retried with backoff
+ *   up to MAX_ATTEMPTS; anything else fails.
+ * - No answer (timeout, network error): the request may have gone out. Never retried, so nobody gets a duplicate.
+ */
+export function classifySendFailure(err: unknown, attempts: number): SendFailureDecision {
+  if (!(err instanceof EmailSendError) || err.status === undefined) return { status: "uncertain" };
+  const retryable = err.status === 429 || err.status >= 500;
+  return retryable && attempts < MAX_ATTEMPTS ? { status: "queued", retryInMinutes: backoffMinutes(attempts) } : { status: "failed" };
+}
+
+type Outcome = Exclude<keyof ProcessSummary, "claimed">;
+type EmailMessage = ReturnType<typeof buildEmail>;
+type StoredSummary = ReturnType<typeof storedSummary>;
+
+/** Sends one notification through the real provider and records the result. */
+async function sendExternally(db: Database, cfg: NotifierConfig, n: NotificationRow, message: EmailMessage, stored: StoredSummary, now: Date): Promise<Outcome> {
+  const attempts = n.attempts + 1;
+  // Mark as an external attempt BEFORE the request leaves, so a crash is counted and never blindly retried.
+  await db.update(notifications).set({ ...stored, provider: "brevo", attempts, updatedAt: now }).where(eq(notifications.id, n.id));
+  try {
+    const res = await cfg.provider.send(message);
+    await finish(db, n.id, { status: "accepted", providerMessageId: res.providerMessageId ?? null, sentAt: now, lastError: null }, now);
+    return "accepted";
+  } catch (err) {
+    const decision = classifySendFailure(err, attempts);
+    const lastError = sanitizeError(err instanceof Error ? err.message : String(err));
+    if (decision.status === "queued") {
+      await finish(db, n.id, { status: "queued", claimedAt: null, nextAttemptAt: new Date(now.getTime() + decision.retryInMinutes * MIN), lastError }, now);
+      return "retryScheduled";
+    }
+    await finish(db, n.id, { status: decision.status, lastError }, now);
+    return decision.status;
+  }
+}
+
+/** Per-sweep budgets: per-profile counts and real sends used so far (persisted count + this sweep's). */
+interface SweepBudget {
+  perProfile: Map<string, number>;
+  realSendsUsed: number;
+}
+
+async function processOne(db: Database, cfg: NotifierConfig, n: NotificationRow, budget: SweepBudget, now: Date): Promise<Outcome> {
+  const count = budget.perProfile.get(n.profileId) ?? 0;
+  if (count >= cfg.maxPerProfilePerSweep) {
+    // Over this sweep's per-profile budget: hand it back for the next sweep.
+    await finish(db, n.id, { status: "queued", claimedAt: null }, now);
+    return "deferred";
+  }
+
+  const rel = await checkRelevance(db, n, cfg, now);
+  if (!rel.ok) {
+    await finish(db, n.id, { status: rel.status, cancelReason: rel.status === "cancelled" ? rel.reason : null, lastError: rel.status === "failed" ? rel.reason : null }, now);
+    return rel.status;
+  }
+  budget.perProfile.set(n.profileId, count + 1);
+  const message = buildEmail(rel.email, rel.content);
+  const stored = storedSummary(rel.content);
+
+  if (!isExternal(cfg)) {
+    await PREVIEW_PROVIDER.send(message);
+    await finish(db, n.id, { ...stored, status: "previewed", provider: "console", attempts: n.attempts + 1, sentAt: now, lastError: null }, now);
+    return "previewed";
+  }
+
+  if (budget.realSendsUsed >= cfg.realSendCap) {
+    await finish(db, n.id, { ...stored, status: "paused_limit", lastError: `Real-send cap reached (${cfg.realSendCap}). Held, not sent.` }, now);
+    return "pausedLimit";
+  }
+
+  budget.realSendsUsed++;
+  const outcome = await sendExternally(db, cfg, n, message, stored, now);
+  // The provider answered with a rejection: nothing went out, so it does not count against the cap.
+  if (outcome === "retryScheduled" || outcome === "failed") budget.realSendsUsed--;
+  return outcome;
+}
+
+/** Claims due notifications and sends (or previews) each one. */
 export async function processQueue(db: Database, cfg: NotifierConfig, now: Date, profileId?: string): Promise<ProcessSummary> {
   const summary = emptySummary();
   const claimed = await claimDue(db, now, cfg.maxPerSweep, profileId);
   summary.claimed = claimed.length;
-  const external = isExternal(cfg);
-  const preview = new ConsoleEmailProvider(() => {});
-  const perProfile = new Map<string, number>();
   // The sweep lease prevents concurrent workers, so a local counter on top of the persisted count is exact.
-  let used = external ? await realSendsUsed(db) : 0;
-
-  for (const n of claimed) {
-    const count = perProfile.get(n.profileId) ?? 0;
-    if (count >= cfg.maxPerProfilePerSweep) {
-      // Over this sweep's per-profile budget: hand it back for the next sweep.
-      await finish(db, n.id, { status: "queued", claimedAt: null }, now);
-      summary.deferred++;
-      continue;
-    }
-
-    const rel = await checkRelevance(db, n, cfg, now);
-    if (!rel.ok) {
-      await finish(db, n.id, { status: rel.status, cancelReason: rel.status === "cancelled" ? rel.reason : null, lastError: rel.status === "failed" ? rel.reason : null }, now);
-      if (rel.status === "cancelled") summary.cancelled++;
-      else summary.failed++;
-      continue;
-    }
-    perProfile.set(n.profileId, count + 1);
-    const message = { to: rel.email, subject: rel.content.subject, text: `${rel.content.text}\n\n${FOOTER}`, html: toHtml(rel.content.text) };
-    const safe = { subject: rel.content.subject, preview: previewOf(rel.content) };
-
-    if (!external) {
-      await preview.send(message);
-      await finish(db, n.id, { ...safe, status: "previewed", provider: "console", attempts: n.attempts + 1, sentAt: now, lastError: null }, now);
-      summary.previewed++;
-      continue;
-    }
-
-    if (used >= cfg.realSendCap) {
-      await finish(db, n.id, { ...safe, status: "paused_limit", lastError: `Real-send cap reached (${cfg.realSendCap}). Held, not sent.` }, now);
-      summary.pausedLimit++;
-      continue;
-    }
-
-    // Mark as an external attempt BEFORE the request leaves, so a crash is counted and never blindly retried.
-    await db.update(notifications).set({ ...safe, provider: "brevo", attempts: n.attempts + 1, updatedAt: now }).where(eq(notifications.id, n.id));
-    used++;
-    try {
-      const res = await cfg.provider.send(message);
-      await finish(db, n.id, { status: "accepted", providerMessageId: res.providerMessageId ?? null, sentAt: now, lastError: null }, now);
-      summary.accepted++;
-    } catch (err) {
-      const attempts = n.attempts + 1;
-      if (err instanceof EmailSendError && err.status !== undefined) {
-        // The provider answered: we know it was NOT accepted.
-        used--;
-        const retryable = err.status === 429 || err.status >= 500;
-        if (retryable && attempts < MAX_ATTEMPTS) {
-          await finish(
-            db,
-            n.id,
-            { status: "queued", claimedAt: null, nextAttemptAt: new Date(now.getTime() + backoffMinutes(attempts) * MIN), lastError: sanitizeError(err.message) },
-            now,
-          );
-          summary.retryScheduled++;
-        } else {
-          await finish(db, n.id, { status: "failed", lastError: sanitizeError(err.message) }, now);
-          summary.failed++;
-        }
-      } else {
-        // Timeout / network error after the request may have left: outcome unknown. Do not retry (avoid duplicates).
-        await finish(db, n.id, { status: "uncertain", lastError: sanitizeError(err instanceof Error ? err.message : String(err)) }, now);
-        summary.uncertain++;
-      }
-    }
-  }
+  const budget: SweepBudget = { perProfile: new Map(), realSendsUsed: isExternal(cfg) ? await realSendsUsed(db) : 0 };
+  for (const n of claimed) summary[await processOne(db, cfg, n, budget, now)]++;
   return summary;
 }
 
