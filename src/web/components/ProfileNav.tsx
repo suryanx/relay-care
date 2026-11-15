@@ -28,15 +28,26 @@ export function ProfileNav({ profileId, name, role }: { profileId: string; name?
   return (
     <nav ref={navRef} aria-label={name ? `${name}'s care` : "Care profile sections"} className="mb-6 lg:mb-0">
       {name && (
-        <div className="mb-4 hidden items-center gap-3 lg:flex">
+        <div className="mb-5 hidden items-center gap-3 lg:flex">
           <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-full bg-brand font-display text-xl text-brand-ink">
             {name.slice(0, 1)}
           </span>
           <div className="min-w-0">
+            <p className="text-sm text-muted">Caring for</p>
             <p className="truncate font-display text-xl leading-tight">{name}</p>
-            <p className="text-sm text-muted">{role === "admin" ? "You are the family administrator" : "You are a caregiver"}</p>
+            {role && role !== "elder" && (
+              <p className="text-sm">
+                Your role: <strong>{role === "admin" ? "Family administrator" : "Caregiver"}</strong>
+              </p>
+            )}
           </div>
         </div>
+      )}
+      {name && (
+        <p className="mb-3 text-base lg:hidden">
+          Caring for <strong>{name}</strong>
+          {role && role !== "elder" ? <> · Your role: {role === "admin" ? "family administrator" : "caregiver"}</> : null}
+        </p>
       )}
       <ul className="flex gap-1 overflow-x-auto border-b border-line pb-px lg:flex-col lg:overflow-visible lg:border-b-0 lg:pb-0">
         {tabs

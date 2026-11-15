@@ -6,6 +6,12 @@ import { useSession } from "../lib/session";
 
 type Mode = "email" | "username";
 
+const DEMO_SHORTCUTS = [
+  { role: "elder", person: "Swastik", label: "Elder: one medicine at a time, four large buttons" },
+  { role: "caregiver", person: "Ravi", label: "Caregiver: picks up and closes follow-ups" },
+  { role: "family", person: "Priya", label: "Family: sees whether today is on track" },
+] as const;
+
 export default function SignIn() {
   const navigate = useNavigate();
   const { refresh } = useSession();
@@ -38,6 +44,13 @@ export default function SignIn() {
 
   return (
     <Shell title="Sign in to Relay">
+      <p className="-mt-4 mb-6 text-lg">
+        Just exploring?{" "}
+        <a href="#explore-heading" className="font-bold text-brand underline underline-offset-4">
+          Try the interactive demo
+        </a>
+        . No account needed.
+      </p>
       <Card>
         <fieldset className="mb-6">
           <legend className="mb-2 font-bold">Who is signing in?</legend>
@@ -68,6 +81,34 @@ export default function SignIn() {
       <p>
         New here? <Link to="/register" className="font-bold text-brand underline">Create a family administrator account</Link>
       </p>
+
+      <section aria-labelledby="explore-heading" className="mt-12 rounded-lg bg-oat p-6">
+        <h2 id="explore-heading" className="font-display text-3xl">
+          Just exploring Relay?
+        </h2>
+        <p className="mt-2 text-lg">
+          Try the interactive demo. No account required. These are simulated, fictional people, not real accounts, and nothing you do there is saved.
+        </p>
+        <ul className="mt-5 grid gap-3">
+          {DEMO_SHORTCUTS.map((d) => (
+            <li key={d.role}>
+              <Link
+                to={`/demo?role=${d.role}`}
+                className="group flex min-h-16 items-center gap-4 rounded-md border-2 border-line-strong bg-surface px-4 py-3 no-underline hover:border-brand"
+              >
+                <span aria-hidden="true" className={`grid size-12 shrink-0 place-items-center rounded-full font-display text-2xl text-brand-ink ${d.role === "elder" ? "bg-terracotta" : "bg-brand"}`}>
+                  {d.person.slice(0, 1)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-display text-2xl leading-tight text-ink">{d.person}</span>
+                  <span className="block text-base text-muted">{d.label}</span>
+                </span>
+                <span className="font-bold text-brand group-hover:underline">Open demo</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
     </Shell>
   );
 }

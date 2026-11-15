@@ -258,6 +258,7 @@ export async function markOverdueUnconfirmed(db: Database, now: Date = new Date(
     .where(
       and(
         profileId ? eq(doses.profileId, profileId) : undefined,
+        isNull(profiles.archivedAt),
         eq(doses.kind, "medication"),
         eq(doses.status, "scheduled"),
         lte(sql`${doses.scheduledAt} + make_interval(mins => ${profiles.graceMinutes})`, now),

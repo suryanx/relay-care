@@ -91,7 +91,15 @@ The direction is **Warm Botanical × Editorial Minimalism**.
 - **Colours:** Alabaster `#FAF7F2` page, Oat `#EFECE6` surfaces, Deep Botanical Teal `#16423C` for every primary action, Warm Charcoal `#1F2421` text. Terracotta `#C85A32` is decorative only (3.96:1 contrast); text uses `#A3431F` (5.8:1).
 - **Type:** Newsreader for headings and for all times and counts (open, tabular figures). Atkinson Hyperlegible for body text and controls. Digits inside body text also render in Newsreader via a `unicode-range` face, so zeros are never slashed.
 - **Status:** always shown with a symbol and words (✓ Taken, – Not taken, ? Unconfirmed, ○ Scheduled), never colour alone.
-- **Layout:** a public landing page at `/`, a read-only fictional demo at `/demo` (no API, no credentials), dashboards at `/home`, and a care-profile sidebar on desktop that becomes a tab row on mobile.
+- **Layout:** a public landing page at `/`, a fictional demo at `/demo`, dashboards at `/home` ("People you care for", where each card shows *your role* in that care circle), and a care-profile sidebar on desktop ("Caring for Swastik / Your role: Caregiver") that becomes a tab row on mobile.
+
+### Public demo (`/demo`)
+Three fictional perspectives share one simulated morning: Swastik (elder), Ravi (caregiver) and Priya (family administrator). Actions run entirely in the browser through a small deterministic reducer (`src/web/demo/model.ts`, unit-tested): no API calls, no accounts, no email, no database. Taking a dose, asking for help, claiming and resolving a follow-up all update the other two views. "Reset demo" restores the story.
+
+### Care profile lifecycle
+- **Archive a care circle** (admin only, recent sign-in, type the person's name): it is hidden from everyone, the elder's device is signed out, and pending reminder emails are cancelled. **No records are deleted.** It can be restored from "People you care for".
+- **Remove a caregiver** is a separate action in Care team. Relay has no "delete user account" action.
+- Creating a profile no longer needs free text for "They agreed". "Other" still requires a description. Every choice is stored as the administrator's declaration, with who made it and when.
 - **Checked with axe-core:** 0 WCAG 2.2 AA violations on every page. No horizontal overflow at 375, 768, 1024, 1440 or 1920 px.
 
 ## Stack

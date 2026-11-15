@@ -1,9 +1,11 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { Router } from "express";
 import { APIError } from "better-auth/api";
 import {
+  archiveProfileSchema,
   createElderAccountSchema,
   createProfileSchema,
+  defaultConsentStatement,
   type MeResponse,
   type ProfileDetail,
   type ProfileSummary,
@@ -11,7 +13,7 @@ import {
 import type { Auth } from "../auth.js";
 import { HttpError, asyncHandler, requireFreshSession, requireMember, requireSession } from "../authz.js";
 import type { Database } from "../db/client.js";
-import { profileMembers, profiles, session, user } from "../db/schema.js";
+import { notifications, profileMembers, profiles, session, user } from "../db/schema.js";
 
 /** Elder accounts sign in by username; Better Auth still needs a unique, non-routable email. */
 const elderPlaceholderEmail = (profileId: string) => `elder-${profileId}@accounts.relay.invalid`;
@@ -27,7 +29,7 @@ async function listMemberships(db: Database, userId: string): Promise<ProfileSum
     })
     .from(profileMembers)
     .innerJoin(profiles, eq(profiles.id, profileMembers.profileId))
-    .where(eq(profileMembers.userId, userId))
+    .where(and(eq(profileMembers.userId, userId), isNull(profiles.archivedAt)))
     .orderBy(profiles.createdAt);
 }
 
@@ -70,7 +72,12 @@ export function profileRoutes(db: Database, auth: Auth): Router {
       const created = await db.transaction(async (tx) => {
         const [profile] = await tx
           .insert(profiles)
-          .values({ ...input, consentRecordedBy: ctx.userId, createdBy: ctx.userId })
+          .values({
+            ...input,
+            consentStatement: input.consentStatement || defaultConsentStatement[input.consentBasis],
+            consentRecordedBy: ctx.userId,
+            createdBy: ctx.userId,
+          })
           .returning();
         await tx.insert(profileMembers).values({ profileId: profile!.id, userId: ctx.userId, role: "admin" });
         return profile!;
@@ -199,6 +206,74 @@ export function profileRoutes(db: Database, auth: Auth): Router {
       if (!profile?.elderUserId) throw new HttpError(404, "NOT_FOUND", "No elder account on this profile.");
       const revoked = await db.delete(session).where(eq(session.userId, profile.elderUserId)).returning({ id: session.id });
       res.json({ revoked: revoked.length });
+    }),
+  );
+
+  /**
+   * Archive (not delete) a care circle: hidden from everyone, reminders stop, all records are kept and
+   * an administrator can restore it. Requires a recent sign-in and typing the person's name.
+   */
+  router.post(
+    "/profiles/:profileId/archive",
+    signedIn,
+    requireMember(db, ["admin"]),
+    requireFreshSession,
+    asyncHandler(async (req, res) => {
+      const { profileId } = req.membership!;
+      const { confirmName } = archiveProfileSchema.parse(req.body);
+      const [profile] = await db.select().from(profiles).where(eq(profiles.id, profileId));
+      if (!profile) throw new HttpError(404, "NOT_FOUND", "Profile not found.");
+      const normalise = (v: string) => v.trim().toLowerCase();
+      if (![profile.preferredName, profile.fullName].map(normalise).includes(normalise(confirmName))) {
+        throw new HttpError(400, "CONFIRMATION_MISMATCH", `Type ${profile.preferredName} exactly to confirm.`);
+      }
+      const now = new Date();
+      await db.transaction(async (tx) => {
+        await tx.update(profiles).set({ archivedAt: now, archivedBy: req.authCtx!.userId, updatedAt: now }).where(eq(profiles.id, profileId));
+        // Nothing should be emailed about an archived care circle.
+        await tx
+          .update(notifications)
+          .set({ status: "cancelled", cancelReason: "profile_archived", updatedAt: now })
+          .where(and(eq(notifications.profileId, profileId), inArray(notifications.status, ["queued", "paused_limit"])));
+        // The elder's device stops working for this circle.
+        if (profile.elderUserId) await tx.delete(session).where(eq(session.userId, profile.elderUserId));
+      });
+      res.json({ archived: true });
+    }),
+  );
+
+  /** Care circles the signed-in person administers that are archived (so they can restore them). */
+  router.get(
+    "/profiles-archived",
+    signedIn,
+    asyncHandler(async (req, res) => {
+      const rows = await db
+        .select({ id: profiles.id, preferredName: profiles.preferredName, fullName: profiles.fullName, archivedAt: profiles.archivedAt })
+        .from(profileMembers)
+        .innerJoin(profiles, eq(profiles.id, profileMembers.profileId))
+        .where(and(eq(profileMembers.userId, req.authCtx!.userId), eq(profileMembers.role, "admin"), isNotNull(profiles.archivedAt)));
+      res.json(rows.map((r) => ({ ...r, archivedAt: r.archivedAt!.toISOString() })));
+    }),
+  );
+
+  router.post(
+    "/profiles/:profileId/restore",
+    signedIn,
+    asyncHandler(async (req, res) => {
+      const profileId = String(req.params.profileId);
+      // requireMember rejects archived circles, so check administrator membership directly here.
+      const [m] = await db
+        .select({ role: profileMembers.role })
+        .from(profileMembers)
+        .where(and(eq(profileMembers.profileId, profileId), eq(profileMembers.userId, req.authCtx!.userId)));
+      if (!m || m.role !== "admin") throw new HttpError(403, "FORBIDDEN", "Only a family administrator can restore this care circle.");
+      const [row] = await db
+        .update(profiles)
+        .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+        .where(and(eq(profiles.id, profileId), isNotNull(profiles.archivedAt)))
+        .returning({ id: profiles.id });
+      if (!row) throw new HttpError(409, "NOT_ARCHIVED", "This care circle is not archived.");
+      res.json({ restored: true });
     }),
   );
 

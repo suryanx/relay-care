@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, gt, gte, inArray, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import type { Database } from "../db/client.js";
 import {
@@ -179,6 +179,7 @@ export async function checkRelevance(db: Database, n: NotificationRow, cfg: Noti
   if (now > n.expiresAt) return { ok: false, status: "cancelled", reason: "expired" };
   const [p] = await db.select().from(profiles).where(eq(profiles.id, n.profileId));
   if (!p) return { ok: false, status: "cancelled", reason: "profile_removed" };
+  if (p.archivedAt) return { ok: false, status: "cancelled", reason: "profile_archived" };
 
   // Recipient must still be an eligible member with the preference on.
   const rule = PREF_FOR[n.type];
@@ -668,7 +669,9 @@ export async function runSweep(db: Database, cfg: NotifierConfig, opts: SweepOpt
     .returning({ id: sweepRuns.id });
   try {
     const recovered = await recoverStuck(db, now);
-    const profileIds = opts.profileId ? [opts.profileId] : (await db.select({ id: profiles.id }).from(profiles)).map((p) => p.id);
+    const profileIds = opts.profileId
+      ? [opts.profileId]
+      : (await db.select({ id: profiles.id }).from(profiles).where(isNull(profiles.archivedAt))).map((p) => p.id);
     let dosesGenerated = 0;
     for (const id of profileIds) dosesGenerated += await generateDosesForProfile(db, id, now);
     const markedUnconfirmed = (await markOverdueUnconfirmed(db, now, opts.profileId)).length;

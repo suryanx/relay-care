@@ -1,11 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Role } from "../shared/schemas.js";
 import type { Auth } from "./auth.js";
 import { FAMILY_SESSION_MAX_AGE_SECONDS, FRESH_SESSION_SECONDS } from "./auth.js";
 import type { Database } from "./db/client.js";
-import { profileMembers, session } from "./db/schema.js";
+import { profileMembers, profiles, session } from "./db/schema.js";
 
 export interface AuthContext {
   userId: string;
@@ -87,14 +87,16 @@ export function requireMember(db: Database, roles: readonly Role[]): RequestHand
       if (typeof profileId !== "string") throw new HttpError(400, "BAD_REQUEST", "Missing profile id.");
 
       const [row] = await db
-        .select({ role: profileMembers.role })
+        .select({ role: profileMembers.role, archivedAt: profiles.archivedAt })
         .from(profileMembers)
+        .innerJoin(profiles, eq(profiles.id, profileMembers.profileId))
         .where(and(eq(profileMembers.profileId, profileId), eq(profileMembers.userId, userId)))
         .limit(1);
 
       if (!row || !roles.includes(row.role)) {
         throw new HttpError(403, "FORBIDDEN", "You do not have access to this.");
       }
+      if (row.archivedAt) throw new HttpError(404, "ARCHIVED", "This care circle has been archived.");
       req.membership = { profileId, role: row.role };
       next();
     } catch (err) {
@@ -129,7 +131,8 @@ export function requireElder(db: Database): RequestHandler {
       const [row] = await db
         .select({ profileId: profileMembers.profileId })
         .from(profileMembers)
-        .where(and(eq(profileMembers.userId, userId), eq(profileMembers.role, "elder")))
+        .innerJoin(profiles, eq(profiles.id, profileMembers.profileId))
+        .where(and(eq(profileMembers.userId, userId), eq(profileMembers.role, "elder"), isNull(profiles.archivedAt)))
         .limit(1);
       if (!row) throw new HttpError(403, "FORBIDDEN", "This page is for elder accounts.");
       req.membership = { profileId: row.profileId, role: "elder" };

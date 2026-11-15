@@ -127,9 +127,9 @@ export function TeamDoseRow({
   const idBase = dose.id.replace(/[^a-z0-9]/gi, "");
   return (
     <li className="rounded-lg border border-line bg-surface p-4 sm:p-5">
-      <div className="flex items-start gap-3">
-        <span className="num w-16 shrink-0 text-xl">{formatTime(dose.localTime)}</span>
-        <div className="min-w-0 flex-1">
+      <div className="grid grid-cols-[minmax(5.5rem,auto)_minmax(0,1fr)] items-start gap-x-4">
+        <span className="num pt-0.5 text-xl">{formatTime(dose.localTime)}</span>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${dose.kind === "medication" ? "bg-brand text-brand-ink" : "border border-line bg-canvas"}`}>
               {dose.kind === "medication" ? "Medicine" : "Routine"}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { consentBasisLabels, type AdherenceResponse, type Appointment, type Medication, type ProfileDetail } from "../../shared/schemas";
 import { CountsGrid, PhaseChip, eventSummary } from "../components/adherence";
 import { ProfileNav } from "../components/ProfileNav";
@@ -100,10 +100,12 @@ export default function ProfileView() {
                 <h3 className="mb-2 mt-6 font-bold">Coming up or needing an answer</h3>
                 <ul className="divide-y divide-line">
                   {upcoming.slice(0, 5).map((d) => (
-                    <li key={d.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
-                      <span className="num w-16 text-xl">{formatTime(d.localTime)}</span>
-                      <span className="min-w-0 flex-1 text-lg">{d.label}</span>
-                      <PhaseChip phase={d.phase} />
+                    <li key={d.id} className="grid grid-cols-[minmax(5.5rem,auto)_minmax(0,1fr)] items-center gap-x-4 gap-y-1 py-3 sm:grid-cols-[minmax(5.5rem,auto)_minmax(0,1fr)_auto]">
+                      <span className="num text-xl">{formatTime(d.localTime)}</span>
+                      <span className="min-w-0 text-lg">{d.label}</span>
+                      <span className="col-start-2 sm:col-start-auto">
+                        <PhaseChip phase={d.phase} />
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -220,6 +222,7 @@ export default function ProfileView() {
             </p>
           </div>
           {profile.role === "admin" && <ElderAccountPanel profile={profile} onChange={reload} />}
+          {profile.role === "admin" && <ArchivePanel profile={profile} />}
         </div>
       </details>
     </Shell>
@@ -305,6 +308,55 @@ function ElderAccountPanel({ profile, onChange }: { profile: ProfileDetail; onCh
           </PrimaryButton>
         </form>
       )}
+    </div>
+  );
+}
+
+/** Archive, not delete: hides the care circle and stops reminders; every record is kept and can be restored. */
+function ArchivePanel({ profile }: { profile: ProfileDetail }) {
+  const navigate = useNavigate();
+  const { refresh } = useSession();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function archive(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const confirmName = String(new FormData(e.currentTarget).get("confirmName") ?? "");
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/profiles/${profile.id}/archive`, { method: "POST", body: JSON.stringify({ confirmName }) });
+      await refresh();
+      navigate("/home");
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.body.code === "REAUTH_REQUIRED"
+          ? "For your security, please sign out and sign in again, then retry within 15 minutes."
+          : errorMessage(err),
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border-2 border-danger/40 p-5">
+      <h3 className="font-bold text-danger">Archive this care circle</h3>
+      <p className="mt-1">
+        Use this if the care circle was created by mistake or is no longer needed. Archiving does <strong>not</strong> delete anything:
+      </p>
+      <ul className="mt-2 list-disc space-y-1 pl-6">
+        <li>{profile.preferredName}’s care circle disappears for you and every caregiver, and their device is signed out.</li>
+        <li>Reminder emails stop.</li>
+        <li>Medicines, appointments and the full history are kept. You can restore it from “People you care for”.</li>
+      </ul>
+      <p className="mt-2 text-base text-muted">To remove one caregiver instead, use Care team. This never deletes anyone’s account.</p>
+      <FormError message={error} />
+      <form onSubmit={archive} className="mt-4">
+        <Field label={`Type “${profile.preferredName}” to confirm`} name="confirmName" required autoComplete="off" />
+        <DangerButton type="submit" busy={busy}>
+          Archive {profile.preferredName}’s care circle
+        </DangerButton>
+      </form>
     </div>
   );
 }

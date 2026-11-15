@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useParams } from "react-router";
 import type { IncidentListResponse, IncidentView } from "../../shared/schemas";
 import { ProfileNav } from "../components/ProfileNav";
-import { EmptyState, FormError, Loading, Pill, SecondaryButton, Shell, buttonClass, type Tone, inputClass } from "../components/ui";
+import { EmptyState, FormError, Loading, Pill, SecondaryButton, Shell, buttonClass, type Tone, OptionGroup, inputClass } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { errorMessage } from "../lib/errors";
 import { useSession } from "../lib/session";
@@ -197,6 +197,7 @@ function IncidentCard({ i, children }: { i: IncidentView; children?: React.React
 
 function ResolveForm({ i, elderName, onResolve }: { i: IncidentView; elderName: string; onResolve: (body: object) => Promise<void> }) {
   const [resolution, setResolution] = useState(i.allowedResolutions[0]!);
+  const [source, setSource] = useState("observed");
   const [busy, setBusy] = useState(false);
   const needsSource = resolution === "taken_confirmed" || resolution === "not_taken_confirmed";
   const idBase = `r-${i.id}`;
@@ -205,38 +206,42 @@ function ResolveForm({ i, elderName, onResolve }: { i: IncidentView; elderName: 
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     setBusy(true);
-    await onResolve({ resolution, source: needsSource ? f.get("source") : undefined, note: f.get("note") || null });
+    await onResolve({ resolution, source: needsSource ? source : undefined, note: f.get("note") || null });
     setBusy(false);
   }
 
   return (
-    <form onSubmit={submit} className="rounded-md bg-oat p-4">
-      <fieldset className="mb-2">
-        <legend className="font-bold">What did you find?</legend>
-        {i.allowedResolutions.map((r) => (
-          <label key={r} className="flex min-h-11 items-center gap-2">
-            <input type="radio" name="resolution" value={r} checked={resolution === r} onChange={() => setResolution(r)} className="size-5 shrink-0" />
-            {RESOLUTION_LABEL[r]}
-          </label>
-        ))}
-      </fieldset>
-      {needsSource && (
-        <fieldset className="mb-2">
-          <legend className="font-bold">How do you know?</legend>
-          <label className="mr-6 inline-flex min-h-11 items-center gap-2">
-            <input type="radio" name="source" value="observed" defaultChecked className="size-5" />I saw it
-          </label>
-          <label className="inline-flex min-h-11 items-center gap-2">
-            <input type="radio" name="source" value="reported_by_other" className="size-5" />
-            {elderName} or someone told me
-          </label>
-        </fieldset>
+    <form onSubmit={submit} className="grid gap-4 rounded-md bg-oat p-4 md:grid-cols-2">
+      <OptionGroup
+        legend="What did you find?"
+        name={`res-${i.id}`}
+        value={resolution}
+        onChange={setResolution}
+        options={i.allowedResolutions.map((r) => ({ id: r, label: RESOLUTION_LABEL[r] ?? r }))}
+      />
+      {needsSource ? (
+        <OptionGroup
+          legend="How do you know?"
+          name={`src-${i.id}`}
+          value={source}
+          onChange={setSource}
+          options={[
+            { id: "observed", label: "I saw it" },
+            { id: "reported_by_other", label: `${elderName} or someone told me` },
+          ]}
+        />
+      ) : (
+        <p className="self-center text-lg text-muted">
+          {resolution === "unable_to_verify" ? "The dose stays unconfirmed. Nothing is marked as taken." : "Add a note below if it helps the family."}
+        </p>
       )}
-      <label htmlFor={`${idBase}-note`} className="block font-bold">
-        Note (optional)
-      </label>
-      <input id={`${idBase}-note`} name="note" maxLength={500} className={`${inputClass} mb-3`} />
-      <button type="submit" disabled={busy} className={buttonClass("primary", "md")}>
+      <div className="md:col-span-2">
+        <label htmlFor={`${idBase}-note`} className="mb-1.5 block font-bold">
+          Note (optional)
+        </label>
+        <input id={`${idBase}-note`} name="note" maxLength={500} className={inputClass} />
+      </div>
+      <button type="submit" disabled={busy} className={buttonClass("primary", "md", "md:col-span-2 md:justify-self-start")}>
         {busy ? "Saving…" : "Record and close"}
       </button>
     </form>

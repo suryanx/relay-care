@@ -45,7 +45,7 @@ describe("profiles and authorization", () => {
   });
 
   it("validates input (bad time zone, missing consent statement)", async () => {
-    const res = await admin.agent.post("/api/profiles").send({ ...syntheticProfile, timezone: "Mars/Olympus", consentStatement: "" });
+    const res = await admin.agent.post("/api/profiles").send({ ...syntheticProfile, timezone: "Mars/Olympus", consentBasis: "other", consentStatement: "" });
     expect(res.status).toBe(400);
     const paths = res.body.error.fields.map((f: { path: string }) => f.path);
     expect(paths).toEqual(expect.arrayContaining(["timezone", "consentStatement"]));

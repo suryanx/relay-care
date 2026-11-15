@@ -21,17 +21,27 @@ export const consentBasisLabels: Record<(typeof consentBasisValues)[number], str
 
 const name = z.string().trim().min(1, "Required").max(80, "Use 80 characters or fewer");
 
-export const createProfileSchema = z.object({
-  fullName: name,
-  preferredName: name,
-  timezone: z.string().trim().refine(isValidTimeZone, "Choose a valid time zone"),
-  consentBasis: z.enum(consentBasisValues),
-  consentStatement: z
-    .string()
-    .trim()
-    .min(10, "Describe how this was agreed, in at least 10 characters")
-    .max(1000),
-});
+export const createProfileSchema = z
+  .object({
+    fullName: name,
+    preferredName: name,
+    timezone: z.string().trim().refine(isValidTimeZone, "Choose a valid time zone"),
+    consentBasis: z.enum(consentBasisValues, { error: "Choose how this care arrangement was agreed" }),
+    /** Optional, except for "other", where the arrangement must be described. */
+    consentStatement: z.string().trim().max(1000).optional().nullable(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.consentBasis === "other" && (v.consentStatement ?? "").length < 10) {
+      ctx.addIssue({ code: "custom", path: ["consentStatement"], message: "Describe the arrangement in at least 10 characters" });
+    }
+  });
+
+/** What gets stored when no description is given: the administrator's declaration, never a verification. */
+export const defaultConsentStatement: Record<(typeof consentBasisValues)[number], string> = {
+  elder_consented: "The administrator confirmed that this person agreed to use Relay and to share their care information with this care team.",
+  legal_authority: "The administrator declared that they hold legal authority to manage this person's care. Relay has not verified this.",
+  other: "",
+};
 export type CreateProfileInput = z.infer<typeof createProfileSchema>;
 
 export const createElderAccountSchema = z.object({
@@ -437,4 +447,13 @@ export interface FollowUpSummary {
   /** Claimed by anyone (being handled). */
   claimed: number;
   mine: number;
+}
+
+export const archiveProfileSchema = z.object({ confirmName: z.string().trim().min(1, "Type the name to confirm").max(80) });
+
+export interface ArchivedProfile {
+  id: string;
+  preferredName: string;
+  fullName: string;
+  archivedAt: string;
 }

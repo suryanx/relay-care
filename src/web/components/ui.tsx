@@ -171,7 +171,7 @@ export function SecondaryButton({ children, className = "", ...rest }: { childre
   );
 }
 
-export function DangerButton({ children, className = "", ...rest }: { children: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) {
+export function DangerButton({ children, className = "", ...rest }: { children: ReactNode; busy?: boolean } & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <Button variant="danger" size="sm" {...rest} className={className}>
       {children}
@@ -307,5 +307,38 @@ export function TextArea({ label, hint, error, ...rest }: { label: string; hint?
     </div>
   );
 }
+
+/** Large, selectable option cards for a radio choice (used in follow-up outcomes). */
+export function OptionGroup({
+  legend,
+  name,
+  value,
+  onChange,
+  options,
+}: {
+  legend: string;
+  name: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { id: string; label: string }[];
+}) {
+  return (
+    <fieldset>
+      <legend className="mb-2 font-bold">{legend}</legend>
+      <div className="grid gap-2">
+        {options.map((o) => (
+          <label
+            key={o.id}
+            className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border-2 border-line-strong bg-surface px-4 has-[:checked]:border-brand has-[:checked]:bg-brand-soft"
+          >
+            <input type="radio" name={name} value={o.id} checked={value === o.id} onChange={() => onChange(o.id)} className="size-5 shrink-0 accent-[var(--color-brand)]" />
+            <span className="text-lg">{o.label}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 
 export { inputClass };

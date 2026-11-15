@@ -116,6 +116,9 @@ export const profiles = pgTable("profiles", {
   createdBy: text("created_by")
     .notNull()
     .references(() => user.id),
+  /** Archived care circles are hidden and inactive, but every record is kept and can be restored. */
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  archivedBy: text("archived_by").references(() => user.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
