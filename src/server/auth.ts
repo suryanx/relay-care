@@ -7,7 +7,8 @@ import { schema } from "./db/schema.js";
 /** Header our own server sets from Express's resolved client IP (client-sent values are overwritten). */
 export const CLIENT_IP_HEADER = "x-relay-client-ip";
 
-export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days, renewed on use
+export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // elder devices: 30 days, renewed on use
+export const FAMILY_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // admins/caregivers: re-sign-in weekly
 export const SESSION_RENEW_AFTER_SECONDS = 60 * 60 * 24; // extend at most once a day
 export const FRESH_SESSION_SECONDS = 60 * 15; // sensitive actions need a sign-in within 15 min
 

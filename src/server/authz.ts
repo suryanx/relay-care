@@ -3,9 +3,9 @@ import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
 import type { Role } from "../shared/schemas.js";
 import type { Auth } from "./auth.js";
-import { FRESH_SESSION_SECONDS } from "./auth.js";
+import { FAMILY_SESSION_MAX_AGE_SECONDS, FRESH_SESSION_SECONDS } from "./auth.js";
 import type { Database } from "./db/client.js";
-import { profileMembers } from "./db/schema.js";
+import { profileMembers, session } from "./db/schema.js";
 
 export interface AuthContext {
   userId: string;
@@ -36,12 +36,34 @@ export class HttpError extends Error {
   }
 }
 
-/** Rejects with 401 unless a valid Better Auth session cookie is present. */
-export function requireSession(auth: Auth): RequestHandler {
+/**
+ * Rejects with 401 unless a valid Better Auth session cookie is present.
+ *
+ * Session policy:
+ * - Elder device sessions use Better Auth's rolling 30-day session (revocable by an admin).
+ * - Family administrator / caregiver sessions are capped at FAMILY_SESSION_MAX_AGE_SECONDS
+ *   from sign-in, regardless of renewal; expired ones are deleted and must sign in again.
+ * - Sensitive operations additionally require a fresh sign-in (requireFreshSession).
+ */
+export function requireSession(auth: Auth, db: Database): RequestHandler {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       const result = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
       if (!result) throw new HttpError(401, "UNAUTHENTICATED", "Please sign in.");
+
+      const sessionAgeMs = Date.now() - new Date(result.session.createdAt).getTime();
+      if (sessionAgeMs > FAMILY_SESSION_MAX_AGE_SECONDS * 1000) {
+        const [elder] = await db
+          .select({ userId: profileMembers.userId })
+          .from(profileMembers)
+          .where(and(eq(profileMembers.userId, result.user.id), eq(profileMembers.role, "elder")))
+          .limit(1);
+        if (!elder) {
+          await db.delete(session).where(eq(session.id, result.session.id));
+          throw new HttpError(401, "SESSION_EXPIRED", "Your session has expired. Please sign in again.");
+        }
+      }
+
       req.authCtx = {
         userId: result.user.id,
         sessionId: result.session.id,

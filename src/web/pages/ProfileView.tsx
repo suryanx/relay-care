@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Navigate, useParams } from "react-router";
-import { consentBasisLabels, type ProfileDetail } from "../../shared/schemas";
+import { Link, Navigate, useParams } from "react-router";
+import { consentBasisLabels, type Appointment, type Medication, type ProfileDetail } from "../../shared/schemas";
+import { ProfileNav } from "../components/ProfileNav";
+import { formatDate, formatTime } from "../lib/format";
+import { useApi } from "../lib/useApi";
 import { Card, Field, FormError, PrimaryButton, Shell } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { errorMessage, fieldErrors } from "../lib/errors";
@@ -18,6 +21,8 @@ export default function ProfileView() {
   const reload = useCallback(async () => setVersion((v) => v + 1), []);
 
   const skipFetch = !me || me.isElder;
+  const meds = useApi<Medication[]>(skipFetch ? null : `/profiles/${profileId}/medications`);
+  const appts = useApi<Appointment[]>(skipFetch ? null : `/profiles/${profileId}/appointments`);
   useEffect(() => {
     if (skipFetch) return;
     let active = true;
@@ -48,8 +53,36 @@ export default function ProfileView() {
   }
 
   return (
-    <Shell title={profile.fullName} wide>
+    <Shell title={profile.fullName} wide nav={<ProfileNav profileId={profile.id} name={profile.preferredName} />}>
       <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <h2 className="mb-3 text-xl font-bold">Medicines</h2>
+          {meds.data === null ? (
+            <p role="status">Loading…</p>
+          ) : (
+            <p>
+              <strong>{meds.data.filter((m) => m.active).length}</strong> active medicine
+              {meds.data.filter((m) => m.active).length === 1 ? "" : "s"}.{" "}
+              <Link to={`/profiles/${profile.id}/schedule`} className="font-bold text-brand underline">
+                See today’s schedule
+              </Link>
+            </p>
+          )}
+        </Card>
+        <Card>
+          <h2 className="mb-3 text-xl font-bold">Next appointment</h2>
+          {appts.data === null ? (
+            <p role="status">Loading…</p>
+          ) : appts.data[0] ? (
+            <p>
+              <strong>{appts.data[0].doctorName}</strong>
+              {appts.data[0].specialty ? ` (${appts.data[0].specialty})` : ""} — {formatDate(appts.data[0].localDate)} at{" "}
+              {formatTime(appts.data[0].localTime)}
+            </p>
+          ) : (
+            <p className="text-muted">None scheduled.</p>
+          )}
+        </Card>
         <Card>
           <h2 className="mb-3 text-xl font-bold">Details</h2>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">

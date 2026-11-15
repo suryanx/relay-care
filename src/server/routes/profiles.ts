@@ -33,7 +33,7 @@ async function listMemberships(db: Database, userId: string): Promise<ProfileSum
 
 export function profileRoutes(db: Database, auth: Auth): Router {
   const router = Router();
-  const signedIn = requireSession(auth);
+  const signedIn = requireSession(auth, db);
 
   router.get(
     "/me",

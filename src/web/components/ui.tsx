@@ -3,7 +3,19 @@ import { Link, useNavigate } from "react-router";
 import { authClient } from "../lib/auth-client";
 import { useSession } from "../lib/session";
 
-export function Shell({ title, children, wide = false }: { title: string; children: ReactNode; wide?: boolean }) {
+export function Shell({
+  title,
+  children,
+  wide = false,
+  nav,
+  eyebrow,
+}: {
+  title: string;
+  children: ReactNode;
+  wide?: boolean;
+  nav?: ReactNode;
+  eyebrow?: string;
+}) {
   const { me, refresh } = useSession();
   const navigate = useNavigate();
 
@@ -38,7 +50,9 @@ export function Shell({ title, children, wide = false }: { title: string; childr
         </div>
       </header>
       <main id="main" className={`mx-auto px-4 py-8 ${wide ? "max-w-4xl" : "max-w-xl"}`}>
+        {eyebrow && <p className="mb-1 font-bold text-muted">{eyebrow}</p>}
         <h1 className="mb-6 text-3xl font-bold leading-tight">{title}</h1>
+        {nav}
         {children}
       </main>
     </>
@@ -110,4 +124,58 @@ export function FormError({ message }: { message: string | null }) {
 
 export function Card({ children }: { children: ReactNode }) {
   return <section className="mb-6 rounded-xl border border-line bg-surface p-5 shadow-sm">{children}</section>;
+}
+
+export function LinkButton({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link to={to} className="inline-flex min-h-12 items-center rounded-lg bg-brand px-5 py-3 font-bold text-brand-ink no-underline hover:opacity-90">
+      {children}
+    </Link>
+  );
+}
+
+export function SecondaryButton({ children, ...rest }: { children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      {...rest}
+      className={`min-h-11 rounded-lg border-2 border-line bg-surface px-4 py-2 font-bold hover:bg-canvas disabled:opacity-60 ${rest.className ?? ""}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function EmptyState({ children }: { children: ReactNode }) {
+  return <p className="rounded-xl border-2 border-dashed border-line bg-surface p-6 text-center text-muted">{children}</p>;
+}
+
+export function TextArea({ label, hint, error, ...rest }: { label: string; hint?: string; error?: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const id = useId();
+  const describedBy = [hint ? `${id}-hint` : "", error ? `${id}-err` : ""].filter(Boolean).join(" ") || undefined;
+  return (
+    <div className="mb-5">
+      <label htmlFor={id} className="mb-1 block font-bold">
+        {label}
+      </label>
+      {hint && (
+        <p id={`${id}-hint`} className="mb-2 text-sm text-muted">
+          {hint}
+        </p>
+      )}
+      <textarea
+        id={id}
+        rows={3}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+        className="w-full rounded-lg border-2 border-line bg-surface px-3 py-3 aria-[invalid]:border-danger"
+        {...rest}
+      />
+      {error && (
+        <p id={`${id}-err`} className="mt-1 text-sm font-bold text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }

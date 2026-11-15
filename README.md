@@ -6,7 +6,15 @@ Relay is a shared care platform for an elderly person, their family and their ca
 
 ## Status
 
-**Checkpoint 1 (foundation) is complete.** It covers sign-in, profiles, roles, an elder device sign-in, the email provider abstraction and tests. Medicines, adherence, appointments, follow-ups and scheduled emails come in later checkpoints.
+- **Checkpoint 1 (foundation):** sign-in, profiles, roles, an elder device sign-in, the email provider abstraction and tests.
+- **Checkpoint 2 (care plan):** medicines, daily routines, appointments, and deterministic dose generation in the profile's time zone (bounded 24 h back / 48 h ahead, idempotent, DST-safe).
+- **Coming next:** dose confirmation and the unconfirmed vs. missed states, caregiver follow-up, and scheduled email reminders.
+
+### Dose generation rules
+- Every medicine or routine is taken daily at one or more local times (`HH:mm`), between an inclusive start date and an optional end date.
+- Dose ids are deterministic (`kind:sourceId:YYYY-MM-DDTHH:mm`), so running generation again never creates duplicates.
+- Editing or stopping a medicine deletes only its **future doses with no recorded outcome**, then regenerates them. Past doses and anything with an outcome are never changed. An edit never back-fills earlier doses.
+- DST: a time in the spring-forward gap moves forward (02:30 → 03:30). An ambiguous fall-back time uses its first occurrence.
 
 ## Stack
 
@@ -51,7 +59,8 @@ npm run dev                 # http://localhost:3000 (Express + Vite, PGlite in .
 
 ## Security notes
 
-- Passcodes are hashed by Better Auth and must be at least 10 characters. Sessions are database-backed, stored in HttpOnly, SameSite=Lax cookies (also `Secure` over HTTPS), and last 30 days, renewed on use.
+- Passcodes are hashed by Better Auth and must be at least 10 characters. Sessions are database-backed and stored in HttpOnly, SameSite=Lax cookies (also `Secure` over HTTPS).
+- Session policy: elder devices keep a rolling 30-day session that an admin can revoke. Family administrator and caregiver sessions expire 7 days after sign-in, however often they're used.
 - Rate limit: 5 sign-in or sign-up attempts per minute per client IP, in every environment. The server sets the client IP itself, so clients cannot spoof it.
 - Sensitive admin actions require a sign-in within the last 15 minutes.
 - Cross-origin state-changing API requests are rejected. Helmet security headers and a CSP are sent in production.
