@@ -33,7 +33,7 @@ export default function SignIn() {
       return;
     }
     const me = await refresh();
-    navigate(me?.isElder ? "/elder" : "/");
+    navigate(me?.isElder ? "/elder" : "/home");
   }
 
   return (

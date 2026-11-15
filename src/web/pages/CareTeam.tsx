@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import type { IncidentListResponse, InvitationView } from "../../shared/schemas";
 import { ProfileNav } from "../components/ProfileNav";
-import { Card, EmptyState, Field, FormError, PrimaryButton, SecondaryButton, Shell } from "../components/ui";
+import { Card, DangerButton, EmptyState, Field, FormError, PrimaryButton, SecondaryButton, Shell } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { errorMessage, fieldErrors } from "../lib/errors";
 import { useSession } from "../lib/session";
@@ -100,9 +100,9 @@ export default function CareTeam() {
               ["Being handled", followUps.data.counts.claimed],
               ["Closed (2 days)", followUps.data.counts.resolvedToday],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-line bg-canvas p-3">
+              <div key={label} className="rounded-md bg-oat p-4">
                 <dt className="text-sm font-bold text-muted">{label}</dt>
-                <dd className="text-3xl font-bold">{value}</dd>
+                <dd className="num mt-1 text-4xl">{value}</dd>
               </div>
             ))}
           </dl>
@@ -141,12 +141,11 @@ export default function CareTeam() {
             {caregivers.map((c) => (
               <li key={c.userId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3">
                 <span className="font-bold">{c.name}</span>
-                <SecondaryButton
+                <DangerButton
                   onClick={() => post(`/profiles/${profileId}/members/${c.userId}/remove`, `Remove ${c.name} from ${profile.data?.preferredName}'s care team? Their access ends immediately.`)}
-                  className="border-danger text-danger"
                 >
                   Remove access<span className="sr-only"> for {c.name}</span>
-                </SecondaryButton>
+                </DangerButton>
               </li>
             ))}
           </ul>
@@ -165,7 +164,7 @@ export default function CareTeam() {
           </PrimaryButton>
         </form>
         {link && (
-          <div className="mt-4 rounded-lg border-2 border-brand bg-emerald-50 p-4" role="status">
+          <div className="mt-4 rounded-md border-l-4 border-brand bg-brand-soft p-4" role="status">
             <p className="font-bold">Invitation created. Share this link privately with the caregiver — it is shown only once.</p>
             <label htmlFor="invite-link" className="sr-only">
               Invitation link

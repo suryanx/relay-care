@@ -84,6 +84,16 @@ Emails never contain medicine names, doctor names or dosing advice. They link ba
 - Editing or stopping a medicine deletes only its **future doses with no recorded outcome**, then regenerates them. Past doses and anything with an outcome are never changed. An edit never back-fills earlier doses.
 - DST: a time in the spring-forward gap moves forward (02:30 → 03:30). An ambiguous fall-back time uses its first occurrence.
 
+## Design
+
+The direction is **Warm Botanical × Editorial Minimalism**.
+
+- **Colours:** Alabaster `#FAF7F2` page, Oat `#EFECE6` surfaces, Deep Botanical Teal `#16423C` for every primary action, Warm Charcoal `#1F2421` text. Terracotta `#C85A32` is decorative only (3.96:1 contrast); text uses `#A3431F` (5.8:1).
+- **Type:** Newsreader for headings and for all times and counts (open, tabular figures). Atkinson Hyperlegible for body text and controls. Digits inside body text also render in Newsreader via a `unicode-range` face, so zeros are never slashed.
+- **Status:** always shown with a symbol and words (✓ Taken, – Not taken, ? Unconfirmed, ○ Scheduled), never colour alone.
+- **Layout:** a public landing page at `/`, a read-only fictional demo at `/demo` (no API, no credentials), dashboards at `/home`, and a care-profile sidebar on desktop that becomes a tab row on mobile.
+- **Checked with axe-core:** 0 WCAG 2.2 AA violations on every page. No horizontal overflow at 375, 768, 1024, 1440 or 1920 px.
+
 ## Stack
 
 | Layer | Choice |

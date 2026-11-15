@@ -5,7 +5,9 @@ import Appointments from "./pages/Appointments";
 import CareTeam from "./pages/CareTeam";
 import ElderHome from "./pages/ElderHome";
 import FollowUps from "./pages/FollowUps";
+import Demo from "./pages/Demo";
 import Home from "./pages/Home";
+import Landing from "./pages/Landing";
 import Invite from "./pages/Invite";
 import MedicationForm from "./pages/MedicationForm";
 import Medications from "./pages/Medications";
@@ -19,11 +21,19 @@ import SignIn from "./pages/SignIn";
 
 export default function App() {
   const { loading } = useSession();
-  if (loading) return <p role="status" className="p-8">Loading Relay…</p>;
+  if (loading) {
+    return (
+      <p role="status" className="grid min-h-dvh place-items-center text-muted">
+        Loading Relay…
+      </p>
+    );
+  }
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/home" element={<Home />} />
+        <Route path="/demo" element={<Demo />} />
         <Route path="/register" element={<Register />} />
         <Route path="/sign-in" element={<SignIn />} />
         <Route path="/profiles/new" element={<NewProfile />} />
@@ -41,7 +51,7 @@ export default function App() {
         <Route path="/profiles/:profileId/team" element={<CareTeam />} />
         <Route path="/invite" element={<Invite />} />
         <Route path="/elder" element={<ElderHome />} />
-        <Route path="*" element={<Home />} />
+        <Route path="*" element={<Landing />} />
       </Routes>
     </BrowserRouter>
   );

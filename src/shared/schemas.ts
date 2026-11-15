@@ -434,5 +434,7 @@ export interface FollowUpSummary {
   preferredName: string;
   role: Role;
   open: number;
+  /** Claimed by anyone (being handled). */
+  claimed: number;
   mine: number;
 }

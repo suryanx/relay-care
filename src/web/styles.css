@@ -1,23 +1,138 @@
 @import "tailwindcss";
 
-/* Provisional tokens — the full design system arrives in a later checkpoint. */
-@theme {
-  --color-canvas: #fbf7f0;
-  --color-surface: #ffffff;
-  --color-ink: #1f2328;
-  --color-muted: #4a5058;
-  --color-line: #d9d2c5;
-  --color-brand: #1d5c4d;
-  --color-brand-ink: #ffffff;
-  --color-danger: #a4161a;
-  --font-sans: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+/* Digits only (U+0030–0039) from Newsreader: open, unslashed lining figures inside running text,
+ * e.g. "10 mg". Everything else stays Atkinson Hyperlegible. */
+@font-face {
+  font-family: "Relay Digits";
+  src: url("@fontsource/newsreader/files/newsreader-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+  unicode-range: U+0030-0039;
+}
+@font-face {
+  font-family: "Relay Digits";
+  src: url("@fontsource/newsreader/files/newsreader-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0030-0039;
 }
 
-html { font-size: 112.5%; } /* 18px base for readability */
-body { background: var(--color-canvas); color: var(--color-ink); font-family: var(--font-sans); line-height: 1.55; }
+/*
+ * Relay design tokens — Warm Botanical × Editorial Minimalism.
+ * Contrast (on alabaster): ink 15:1, brand 10.5:1, muted 5.9:1, attention-ink 5.8:1, danger 7.7:1.
+ * Brand terracotta #C85A32 is 3.96:1, so it is used only for large or decorative marks, never body text.
+ */
+@theme {
+  --color-canvas: #faf7f2; /* Warm Alabaster — page */
+  --color-oat: #efece6; /* Soft Sand / Oat — quiet surfaces */
+  --color-surface: #fffdf9; /* raised paper */
+  --color-ink: #1f2421; /* Warm Charcoal */
+  --color-muted: #5b625d;
+  --color-line: #ddd7cc;
+  --color-line-strong: #c9c1b3;
 
-:focus-visible { outline: 3px solid #b8860b; outline-offset: 3px; }
+  --color-brand: #16423c; /* Deep Botanical Teal — every primary action */
+  --color-brand-ink: #ffffff;
+  --color-brand-soft: #e3ede8;
+  --color-brand-hover: #0f322d;
+
+  --color-terracotta: #c85a32; /* accent, decorative/large only */
+  --color-attention: #a3431f; /* terracotta, text-safe */
+  --color-attention-soft: #f6e7df;
+  --color-danger: #8f2d1e;
+  --color-danger-soft: #f7e3de;
+
+  --font-sans: "Relay Digits", "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.25rem;
+  --shadow-paper: 0 1px 0 rgb(31 36 33 / 0.04), 0 8px 24px -16px rgb(31 36 33 / 0.18);
+}
+
+/* ---------- Global shell (fixes the right-edge strip at full-screen widths) ----------
+ * Root cause: only <body> was painted; <html> and #root had no explicit width/background,
+ * and negative-margin scrolling tab rows could widen the document. Paint html+body,
+ * stretch #root, and clip stray horizontal overflow at the document level. */
+html {
+  font-size: 112.5%; /* 18px base for readability */
+  background: var(--color-canvas);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  overflow-x: clip;
+}
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+#root {
+  min-height: 100dvh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom rules live in layers so Tailwind utilities (e.g. whitespace-normal, hidden) can override them. */
+@layer base {
+  /* Editorial headings use the display face. */
+  h1,
+  h2 {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
+  }
+}
+
+@layer components {
+  /* Times, counts and dates: Newsreader's open, unslashed lining figures, aligned in columns.
+   * (Atkinson Hyperlegible's slashed zero read as an odd glyph in dashboards.) */
+  .num {
+    font-family: var(--font-display);
+    font-variant-numeric: lining-nums tabular-nums;
+    white-space: nowrap;
+  }
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-terracotta);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--color-brand-soft);
+}
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; animation: none !important; }
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* One deliberate motion moment: the relay hand-off line draws once on the landing page. */
+@keyframes relay-draw {
+  from {
+    stroke-dashoffset: var(--relay-length, 900);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.relay-line {
+  stroke-dasharray: var(--relay-length, 900);
+  animation: relay-draw 1.8s cubic-bezier(0.65, 0, 0.35, 1) 0.2s both;
 }

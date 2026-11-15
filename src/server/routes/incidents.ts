@@ -38,7 +38,12 @@ export function incidentRoutes(db: Database, auth: Auth): Router {
           .select({ status: incidents.status, claimedBy: incidents.claimedBy })
           .from(incidents)
           .where(and(eq(incidents.profileId, p.profileId), inArray(incidents.status, ["open", "claimed"])));
-        out.push({ ...p, open: rows.filter((r) => r.status === "open").length, mine: rows.filter((r) => r.claimedBy === userId).length });
+        out.push({
+          ...p,
+          open: rows.filter((r) => r.status === "open").length,
+          claimed: rows.filter((r) => r.status === "claimed").length,
+          mine: rows.filter((r) => r.claimedBy === userId).length,
+        });
       }
       res.json(out);
     }),

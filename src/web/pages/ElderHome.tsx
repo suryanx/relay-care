@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import type { DoseView, ElderTodayResponse } from "../../shared/schemas";
+import { Logo, Pill, buttonClass, type Tone } from "../components/ui";
 import { ApiError, api } from "../lib/api";
 import { authClient } from "../lib/auth-client";
 import { formatDate, formatTime } from "../lib/format";
@@ -16,29 +17,26 @@ export function greeting(name: string, timeZone: string, now: Date): string {
   return `Good night, ${name}`;
 }
 
-const STATUS: Record<DoseView["phase"], { text: string; symbol: string; tone: string }> = {
-  upcoming: { text: "Later today", symbol: "○", tone: "border-line bg-canvas text-ink" },
-  due: { text: "Due now", symbol: "●", tone: "border-amber-700 bg-amber-50 text-amber-900" },
-  unconfirmed: { text: "Not confirmed yet", symbol: "?", tone: "border-amber-700 bg-amber-50 text-amber-900" },
-  taken: { text: "Taken", symbol: "✓", tone: "border-brand bg-emerald-50 text-brand" },
-  not_taken: { text: "Not taken", symbol: "–", tone: "border-line bg-canvas text-ink" },
-  void: { text: "Removed", symbol: "×", tone: "border-line bg-canvas text-muted" },
+const STATUS: Record<DoseView["phase"], { text: string; symbol: string; tone: Tone }> = {
+  upcoming: { text: "Later today", symbol: "○", tone: "neutral" },
+  due: { text: "Due now", symbol: "●", tone: "brand" },
+  unconfirmed: { text: "Not confirmed yet", symbol: "?", tone: "attention" },
+  taken: { text: "Taken", symbol: "✓", tone: "good" },
+  not_taken: { text: "Not taken", symbol: "–", tone: "neutral" },
+  void: { text: "Removed", symbol: "×", tone: "neutral" },
 };
 
 const ROUTINE_STATUS: Partial<Record<DoseView["phase"], string>> = { taken: "Done", upcoming: "Later today", due: "Today" };
 
 function StatusChip({ dose }: { dose: DoseView }) {
   const s = STATUS[dose.phase];
-  const text = dose.kind === "routine" ? (ROUTINE_STATUS[dose.phase] ?? s.text) : s.text;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border-2 px-3 py-1 text-base font-bold ${s.tone}`}>
-      <span aria-hidden="true">{s.symbol}</span>
-      {text}
-    </span>
+    <Pill tone={s.tone} symbol={s.symbol}>
+      {dose.kind === "routine" ? (ROUTINE_STATUS[dose.phase] ?? s.text) : s.text}
+    </Pill>
   );
 }
 
-const BIG_BTN = "min-h-16 w-full rounded-2xl px-5 py-4 text-xl font-bold disabled:opacity-60";
 
 export default function ElderHome() {
   const { me, refresh: refreshSession } = useSession();
@@ -72,12 +70,12 @@ export default function ElderHome() {
   }, [titleGreeting]);
 
   if (!me) return <Navigate to="/sign-in" replace />;
-  if (!me.isElder) return <Navigate to="/" replace />;
+  if (!me.isElder) return <Navigate to="/home" replace />;
 
   const data = today.data;
   if (!data) {
     return (
-      <main className="mx-auto max-w-2xl p-6 text-2xl" id="main">
+      <main className="grid min-h-dvh place-items-center p-6 text-2xl text-muted" id="main">
         <p role="status">{today.error ?? "Loading your day…"}</p>
       </main>
     );
@@ -138,17 +136,24 @@ export default function ElderHome() {
     navigate("/sign-in");
   }
 
+  const BIG = (variant: "primary" | "secondary") => buttonClass(variant, "lg", "min-h-16 w-full text-2xl");
+
   return (
-    <div className="min-h-screen bg-canvas">
-      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-10 focus:rounded focus:bg-surface focus:p-3">
+    <div className="flex min-h-dvh flex-col bg-canvas">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-surface focus:p-3 focus:font-bold">
         Skip to main content
       </a>
-      <main id="main" className="mx-auto max-w-2xl px-4 pb-16 pt-10 text-lg sm:pt-14">
-        <header className="mb-8 text-center">
-          <p className="mb-2 text-base font-bold uppercase tracking-widest text-brand">Relay</p>
-          <h1 className="text-4xl font-bold leading-tight sm:text-5xl">{greeting(data.preferredName, tz, now)}</h1>
-          <p className="mt-3 text-xl text-muted">{clock}</p>
-        </header>
+      <header className="w-full border-b border-line">
+        <div className="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-4">
+          <Logo to="/elder" />
+          <p className="num hidden text-lg text-muted sm:block">{clock}</p>
+        </div>
+      </header>
+
+      <main id="main" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-16 pt-10 text-xl sm:pt-14">
+        <h1 className="font-display text-5xl font-medium leading-tight sm:text-6xl">{greeting(data.preferredName, tz, now)}</h1>
+        <p className="num mt-3 whitespace-normal text-2xl text-muted sm:hidden">{clock}</p>
+        <p className="mt-2 text-2xl text-muted">{data.doses.length ? "Here is your day." : "Nothing is planned for today."}</p>
 
         <div
           ref={messageRef}
@@ -157,8 +162,8 @@ export default function ElderHome() {
           aria-live="polite"
           className={
             message
-              ? `mb-6 rounded-2xl border-2 p-5 text-xl ${
-                  message.tone === "error" ? "border-danger bg-surface text-danger" : message.tone === "ok" ? "border-brand bg-emerald-50" : "border-line bg-surface"
+              ? `mt-8 rounded-lg border-l-4 p-5 text-xl ${
+                  message.tone === "error" ? "border-danger bg-danger-soft text-danger" : message.tone === "ok" ? "border-brand bg-brand-soft" : "border-line-strong bg-oat"
                 }`
               : "sr-only"
           }
@@ -166,45 +171,47 @@ export default function ElderHome() {
           {message?.text}
         </div>
 
-        {/* Next medicine */}
-        <section aria-labelledby="next-heading" className="mb-8 rounded-3xl border-2 border-line bg-surface p-6 shadow-sm sm:p-8">
+        {/* The one thing to do now */}
+        <section aria-labelledby="next-heading" className="mt-8 rounded-lg border border-line bg-surface p-6 shadow-[var(--shadow-paper)] sm:p-8">
           {focus ? (
             <>
-              <h2 id="next-heading" className="mb-1 text-lg font-bold uppercase tracking-wide text-muted">
+              <h2 id="next-heading" className="text-xl font-bold text-muted">
                 {focus.canRecord ? "Your medicine now" : "Your next medicine"}
               </h2>
-              <p className="text-5xl font-bold text-brand">{formatTime(focus.localTime)}</p>
-              <p className="mt-2 text-3xl font-bold">{focus.label}</p>
-              {focus.detail && <p className="mt-2 text-xl">{focus.detail}</p>}
-              <div className="mt-3">
+              <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+                <p className="num text-6xl text-brand">{formatTime(focus.localTime)}</p>
                 <StatusChip dose={focus} />
               </div>
+              <p className="mt-3 font-display text-4xl leading-tight">{focus.label}</p>
+              {focus.detail && <p className="mt-2 text-2xl">{focus.detail}</p>}
 
               {focus.canRecord ? (
-                <div className="mt-6 grid gap-3">
-                  <button type="button" disabled={busy} onClick={() => taken(focus)} className={`${BIG_BTN} bg-brand text-brand-ink`}>
-                    ✓ I have taken it
+                <div className="mt-8 grid gap-3">
+                  <button type="button" disabled={busy} onClick={() => taken(focus)} className={BIG("primary")}>
+                    <span aria-hidden="true">✓</span> I have taken it
                   </button>
                   {focus.canSnooze && (
-                    <button type="button" disabled={busy} onClick={() => later(focus)} className={`${BIG_BTN} border-2 border-brand bg-surface text-brand`}>
+                    <button type="button" disabled={busy} onClick={() => later(focus)} className={`${BIG("secondary")} flex-col gap-0 py-3`}>
                       Remind me later
-                      <span className="block text-base font-normal">in 15 minutes · {2 - focus.snoozeCount} left</span>
+                      <span className="text-lg font-normal text-muted">
+                        in 15 minutes, <span className="num">{2 - focus.snoozeCount}</span> left
+                      </span>
                     </button>
                   )}
-                  <button type="button" disabled={busy} onClick={() => notTaken(focus)} className={`${BIG_BTN} border-2 border-line bg-surface text-ink`}>
+                  <button type="button" disabled={busy} onClick={() => notTaken(focus)} className={BIG("secondary")}>
                     I did not take it
                   </button>
                 </div>
               ) : (
-                <p className="mt-6 text-xl">You can confirm this from an hour before it is due.</p>
+                <p className="mt-6 text-xl text-muted">You can confirm this from an hour before it is due.</p>
               )}
             </>
           ) : (
             <>
-              <h2 id="next-heading" className="text-3xl font-bold">
+              <h2 id="next-heading" className="font-display text-4xl">
                 {meds.length ? "All done for today" : "No medicines today"}
               </h2>
-              <p className="mt-2 text-xl text-muted">{meds.length ? "Thank you. There is nothing else to confirm right now." : "Enjoy your day."}</p>
+              <p className="mt-2 text-2xl text-muted">{meds.length ? "Thank you. There is nothing else to confirm right now." : "Enjoy your day."}</p>
             </>
           )}
         </section>
@@ -216,36 +223,36 @@ export default function ElderHome() {
           type="button"
           disabled={busy}
           onClick={() => help(focus?.canRecord ? focus : null)}
-          className={`${BIG_BTN} mb-10 border-2 border-amber-700 bg-amber-50 text-amber-900`}
+          className="mt-6 flex min-h-16 w-full flex-col items-center justify-center rounded-md border-2 border-attention bg-attention-soft px-5 py-3 text-2xl font-bold text-attention hover:bg-[#f2dccf] disabled:opacity-60"
         >
           I need help
-          <span className="block text-base font-normal">Lets your care team know in Relay</span>
+          <span className="text-lg font-normal">Lets your care team know in Relay</span>
         </button>
 
         {/* Today's medicines */}
-        <section aria-labelledby="meds-heading" className="mb-10">
-          <h2 id="meds-heading" className="mb-4 text-2xl font-bold">
+        <section aria-labelledby="meds-heading" className="mt-14">
+          <h2 id="meds-heading" className="mb-5 font-display text-3xl">
             Today’s medicines
           </h2>
           {meds.length === 0 ? (
             <p className="text-muted">Nothing scheduled.</p>
           ) : (
-            <ul className="space-y-3">
+            <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
               {meds.map((d) => (
-                <li key={d.id} className="rounded-2xl border border-line bg-surface p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-2xl font-bold">{formatTime(d.localTime)}</p>
+                <li key={d.id} className="p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="num text-3xl">{formatTime(d.localTime)}</p>
                     <StatusChip dose={d} />
                   </div>
-                  <p className="mt-1 text-xl font-bold">{d.label}</p>
-                  {d.detail && <p className="text-lg text-muted">{d.detail}</p>}
-                  {d.phase === "unconfirmed" && <p className="mt-1">If you already took this, you can still tell us below.</p>}
+                  <p className="mt-1 text-2xl font-bold">{d.label}</p>
+                  {d.detail && <p className="text-xl text-muted">{d.detail}</p>}
+                  {d.phase === "unconfirmed" && <p className="mt-2 text-xl">If you already took this, you can still tell us.</p>}
                   {d.canRecord && d.id !== focus?.id && (
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <button type="button" disabled={busy} onClick={() => taken(d)} className="min-h-14 rounded-xl bg-brand px-4 text-lg font-bold text-brand-ink">
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <button type="button" disabled={busy} onClick={() => taken(d)} className={buttonClass("primary", "lg")}>
                         ✓ I have taken it<span className="sr-only"> — {d.label}</span>
                       </button>
-                      <button type="button" disabled={busy} onClick={() => notTaken(d)} className="min-h-14 rounded-xl border-2 border-line px-4 text-lg font-bold">
+                      <button type="button" disabled={busy} onClick={() => notTaken(d)} className={buttonClass("secondary", "lg")}>
                         I did not take it<span className="sr-only"> — {d.label}</span>
                       </button>
                     </div>
@@ -257,16 +264,16 @@ export default function ElderHome() {
         </section>
 
         {routines.length > 0 && (
-          <section aria-labelledby="routines-heading" className="mb-10">
-            <h2 id="routines-heading" className="mb-4 text-2xl font-bold">
+          <section aria-labelledby="routines-heading" className="mt-14">
+            <h2 id="routines-heading" className="mb-5 font-display text-3xl">
               Today’s routines
             </h2>
-            <ul className="space-y-3">
+            <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
               {routines.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface p-4">
+                <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 p-5">
                   <div>
-                    <p className="text-xl font-bold">{r.label}</p>
-                    <p className="text-muted">{formatTime(r.localTime)}</p>
+                    <p className="text-2xl font-bold">{r.label}</p>
+                    <p className="num text-xl text-muted">{formatTime(r.localTime)}</p>
                   </div>
                   {r.status === "taken" ? (
                     <StatusChip dose={r} />
@@ -275,9 +282,9 @@ export default function ElderHome() {
                       type="button"
                       disabled={busy}
                       onClick={() =>
-                        act(`/elder/doses/${encodeURIComponent(r.id)}/outcome`, { outcome: "taken" }, () => ({ text: `Well done — “${r.label}” is marked as done.`, tone: "ok" }))
+                        act(`/elder/doses/${encodeURIComponent(r.id)}/outcome`, { outcome: "taken" }, () => ({ text: `Well done. “${r.label}” is marked as done.`, tone: "ok" }))
                       }
-                      className="min-h-14 rounded-xl border-2 border-brand px-5 text-lg font-bold text-brand"
+                      className={buttonClass("secondary", "lg")}
                     >
                       Mark as done<span className="sr-only"> — {r.label}</span>
                     </button>
@@ -290,8 +297,8 @@ export default function ElderHome() {
           </section>
         )}
 
-        <section aria-labelledby="appts-heading" className="mb-10">
-          <h2 id="appts-heading" className="mb-4 text-2xl font-bold">
+        <section aria-labelledby="appts-heading" className="mt-14">
+          <h2 id="appts-heading" className="mb-5 font-display text-3xl">
             Upcoming appointments
           </h2>
           {data.appointments.length === 0 ? (
@@ -299,24 +306,24 @@ export default function ElderHome() {
           ) : (
             <ul className="space-y-3">
               {data.appointments.map((a) => (
-                <li key={a.id} className="rounded-2xl border border-line bg-surface p-4">
-                  <p className="text-lg font-bold text-brand">
-                    {formatDate(a.localDate)} at {formatTime(a.localTime)}
+                <li key={a.id} className="rounded-lg bg-oat p-5">
+                  <p className="num text-xl font-bold text-brand">
+                    {formatDate(a.localDate)}, {formatTime(a.localTime)}
                   </p>
-                  <p className="text-xl font-bold">
+                  <p className="mt-1 text-2xl font-bold">
                     {a.doctorName}
-                    {a.specialty ? ` — ${a.specialty}` : ""}
+                    {a.specialty ? `, ${a.specialty}` : ""}
                   </p>
-                  {a.location && <p className="text-muted">{a.location}</p>}
+                  {a.location && <p className="text-xl text-muted">{a.location}</p>}
                 </li>
               ))}
             </ul>
           )}
         </section>
 
-        <p className="text-center text-base text-muted">Relay helps your family stay in touch. It does not replace your doctor or emergency services.</p>
-        <p className="mt-6 text-center">
-          <button type="button" onClick={signOut} className="min-h-11 text-base text-muted underline">
+        <p className="mt-14 text-center text-lg text-muted">Relay helps your family stay in touch. It does not replace your doctor or emergency services.</p>
+        <p className="mt-4 text-center">
+          <button type="button" onClick={signOut} className="min-h-11 text-lg text-muted underline">
             Sign out of this device
           </button>
         </p>
@@ -333,12 +340,12 @@ function HelpStatus({ help }: { help: ElderTodayResponse["helpRequests"][number]
         ? `${help.handledBy ?? "Someone in your care team"} is looking into your request.`
         : "Your care team marked your request for help as sorted out.";
   return (
-    <section aria-labelledby="help-status-heading" className="mb-4 rounded-2xl border-2 border-line bg-surface p-5">
-      <h2 id="help-status-heading" className="text-xl font-bold">
+    <section aria-labelledby="help-status-heading" className="mt-6 rounded-lg border-l-4 border-brand bg-brand-soft p-5">
+      <h2 id="help-status-heading" className="font-display text-2xl">
         Your request for help
       </h2>
       <p className="mt-1 text-xl">{text}</p>
-      <p className="mt-2 text-base text-muted">Relay is not an emergency service. In an emergency, call your local emergency number.</p>
+      <p className="mt-2 text-lg text-muted">Relay is not an emergency service. In an emergency, call your local emergency number.</p>
     </section>
   );
 }

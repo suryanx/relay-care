@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import type { Medication } from "../../shared/schemas";
 import { ProfileNav } from "../components/ProfileNav";
-import { Card, EmptyState, FormError, LinkButton, SecondaryButton, Shell } from "../components/ui";
+import { Card, DangerButton, EmptyState, FormError, LinkButton, Loading, SecondaryButton, Shell } from "../components/ui";
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/errors";
 import { formatDate, formatTime } from "../lib/format";
@@ -44,7 +44,7 @@ export default function Medications() {
         <LinkButton to={`/profiles/${profileId}/medications/new`}>Add medicine</LinkButton>
       </div>
 
-      {meds.data === null && !meds.error && <p role="status">Loading medicines…</p>}
+      {meds.data === null && !meds.error && <Loading label="Loading medicines…" />}
       {meds.data && active.length === 0 && <EmptyState>No active medicines yet. Add the first one from the prescription.</EmptyState>}
 
       <ul className="space-y-4">
@@ -53,12 +53,12 @@ export default function Medications() {
             <Card>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-xl font-bold">
+                  <h2 className="font-display text-2xl">
                     {m.name} {m.strength && <span className="font-normal text-muted">· {m.strength}</span>}
                   </h2>
                   <p className="mt-1">
                     <span className="font-bold">Daily at </span>
-                    {m.times.map(formatTime).join(", ")}
+                    <span className="num">{m.times.map(formatTime).join(", ")}</span>
                   </p>
                   {m.instructions && <p className="mt-1 text-muted">“{m.instructions}”</p>}
                   <p className="mt-1 text-sm text-muted">
@@ -76,9 +76,9 @@ export default function Medications() {
                   </Link>
                   {confirming === m.id ? (
                     <>
-                      <SecondaryButton onClick={() => deactivate(m.id)} className="border-danger text-danger">
+                      <DangerButton onClick={() => deactivate(m.id)}>
                         Confirm stop<span className="sr-only"> {m.name}</span>
-                      </SecondaryButton>
+                      </DangerButton>
                       <SecondaryButton onClick={() => setConfirming(null)}>Keep</SecondaryButton>
                     </>
                   ) : (
@@ -106,7 +106,7 @@ export default function Medications() {
           <ul className="space-y-2">
             {inactive.map((m) => (
               <li key={m.id} className="rounded-lg border border-line bg-surface px-4 py-3 text-muted">
-                {m.name} {m.strength && `· ${m.strength}`} — was daily at {m.times.map(formatTime).join(", ")}
+                {m.name} {m.strength && `· ${m.strength}`} — was daily at <span className="num">{m.times.map(formatTime).join(", ")}</span>
               </li>
             ))}
           </ul>

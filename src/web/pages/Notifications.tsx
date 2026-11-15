@@ -29,11 +29,11 @@ const TYPE_LABEL: Record<NotificationTypeValue, string> = {
 const STATUS_LABEL: Record<NotificationStatusValue, { text: string; symbol: string; cls: string }> = {
   queued: { text: "Queued", symbol: "…", cls: "border-line bg-canvas" },
   sending: { text: "Sending", symbol: "→", cls: "border-line bg-canvas" },
-  accepted: { text: "Accepted by email provider", symbol: "✓", cls: "border-brand bg-emerald-50 text-brand" },
+  accepted: { text: "Accepted by email provider", symbol: "✓", cls: "border-brand bg-brand-soft text-brand" },
   previewed: { text: "Preview only — not sent", symbol: "◇", cls: "border-line bg-surface" },
   failed: { text: "Failed", symbol: "!", cls: "border-danger bg-surface text-danger" },
-  uncertain: { text: "Outcome unknown — not retried", symbol: "?", cls: "border-amber-700 bg-amber-50 text-amber-900" },
-  paused_limit: { text: "Held — sending limit reached", symbol: "‖", cls: "border-amber-700 bg-amber-50 text-amber-900" },
+  uncertain: { text: "Outcome unknown — not retried", symbol: "?", cls: "border-attention bg-attention-soft text-attention" },
+  paused_limit: { text: "Held — sending limit reached", symbol: "‖", cls: "border-attention bg-attention-soft text-attention" },
   cancelled: { text: "Cancelled", symbol: "×", cls: "border-line bg-canvas text-muted" },
 };
 
@@ -183,7 +183,7 @@ export default function Notifications() {
 function NotificationCard({ n }: { n: NotificationItem }) {
   const s = STATUS_LABEL[n.status];
   return (
-    <li className="rounded-xl border border-line bg-surface p-4">
+    <li className="rounded-lg border border-line bg-surface p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-bold">{TYPE_LABEL[n.type]}</span>
         <span className={`inline-flex items-center gap-1 rounded-full border-2 px-2.5 py-0.5 text-sm font-bold ${s.cls}`}>

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import type { Appointment } from "../../shared/schemas";
 import { ProfileNav } from "../components/ProfileNav";
-import { Card, EmptyState, FormError, LinkButton, SecondaryButton, Shell } from "../components/ui";
+import { Card, EmptyState, FormError, LinkButton, Loading, SecondaryButton, Shell } from "../components/ui";
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/errors";
 import { formatDate, formatTime } from "../lib/format";
@@ -42,7 +42,7 @@ export default function Appointments() {
         <LinkButton to={`/profiles/${profileId}/appointments/new`}>Add appointment</LinkButton>
       </div>
 
-      {list.data === null && !list.error && <p role="status">Loading appointments…</p>}
+      {list.data === null && !list.error && <Loading label="Loading appointments…" />}
       {list.data?.length === 0 && <EmptyState>{showAll ? "No appointments recorded." : "No upcoming appointments."}</EmptyState>}
       <ul className="space-y-4">
         {list.data?.map((a) => {
@@ -52,11 +52,11 @@ export default function Appointments() {
               <Card>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className={cancelled ? "text-muted" : ""}>
-                    <p className="font-bold text-brand">
+                    <p className="num font-bold text-brand">
                       {formatDate(a.localDate)} · {formatTime(a.localTime)}
                       {cancelled && <span className="ml-2 rounded bg-canvas px-2 py-0.5 text-sm text-danger">Cancelled</span>}
                     </p>
-                    <h2 className="text-xl font-bold">
+                    <h2 className="font-display text-2xl">
                       {a.doctorName}
                       {a.specialty && <span className="font-normal text-muted"> · {a.specialty}</span>}
                     </h2>

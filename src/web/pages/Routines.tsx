@@ -65,11 +65,11 @@ export default function Routines() {
       {list.data && active.length === 0 && !editing && <EmptyState>No routines yet.</EmptyState>}
       <ul className="space-y-3">
         {active.map((r) => (
-          <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface p-4">
+          <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface p-4">
             <div>
               <p className="text-lg font-bold">{r.title}</p>
               <p className="text-muted">
-                Daily at {r.times.map(formatTime).join(", ")}
+                Daily at <span className="num">{r.times.map(formatTime).join(", ")}</span>
                 {r.notes ? ` · ${r.notes}` : ""}
               </p>
             </div>

@@ -3,7 +3,7 @@ import type { AdherenceCountsView, DoseEventView, DoseView, SourceValue } from "
 import { api } from "../lib/api";
 import { errorMessage } from "../lib/errors";
 import { formatTime } from "../lib/format";
-import { FormError, SecondaryButton } from "./ui";
+import { FormError, Pill, SecondaryButton, type Tone } from "./ui";
 
 export const SOURCE_LABEL: Record<SourceValue, string> = {
   self_reported: "Self-reported",
@@ -12,40 +12,42 @@ export const SOURCE_LABEL: Record<SourceValue, string> = {
   system: "Automatic",
 };
 
-const PHASE_LABEL: Record<DoseView["phase"], { text: string; symbol: string; cls: string }> = {
-  upcoming: { text: "Upcoming", symbol: "○", cls: "border-line bg-canvas" },
-  due: { text: "Due", symbol: "●", cls: "border-amber-700 bg-amber-50 text-amber-900" },
-  unconfirmed: { text: "Unconfirmed", symbol: "?", cls: "border-amber-700 bg-amber-50 text-amber-900" },
-  taken: { text: "Taken", symbol: "✓", cls: "border-brand bg-emerald-50 text-brand" },
-  not_taken: { text: "Not taken", symbol: "–", cls: "border-ink bg-surface" },
-  void: { text: "Removed", symbol: "×", cls: "border-line text-muted" },
+const PHASE_LABEL: Record<DoseView["phase"], { text: string; symbol: string; tone: Tone }> = {
+  upcoming: { text: "Upcoming", symbol: "○", tone: "neutral" },
+  due: { text: "Due", symbol: "●", tone: "brand" },
+  unconfirmed: { text: "Unconfirmed", symbol: "?", tone: "attention" },
+  taken: { text: "Taken", symbol: "✓", tone: "good" },
+  not_taken: { text: "Not taken", symbol: "–", tone: "neutral" },
+  void: { text: "Removed", symbol: "×", tone: "neutral" },
 };
 
 export function PhaseChip({ phase }: { phase: DoseView["phase"] }) {
   const p = PHASE_LABEL[phase];
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border-2 px-2.5 py-0.5 text-sm font-bold ${p.cls}`}>
-      <span aria-hidden="true">{p.symbol}</span>
+    <Pill tone={p.tone} symbol={p.symbol} size="sm">
       {p.text}
-    </span>
+    </Pill>
   );
 }
 
 /** Never shows "missed": Not taken (explicit) and Unconfirmed (unknown) are always separate. */
 export function CountsGrid({ counts }: { counts: AdherenceCountsView }) {
   const cells = [
-    { label: "Taken", value: counts.taken, hint: "Confirmed" },
-    { label: "Not taken", value: counts.notTaken, hint: "Reported" },
-    { label: "Unconfirmed", value: counts.unconfirmed, hint: "No answer yet" },
-    { label: "Still to come", value: counts.pending, hint: "Not yet due or due now" },
+    { label: "Taken", value: counts.taken, hint: "Confirmed", symbol: "✓", cls: "text-brand" },
+    { label: "Not taken", value: counts.notTaken, hint: "Reported", symbol: "–", cls: "text-ink" },
+    { label: "Unconfirmed", value: counts.unconfirmed, hint: "No answer yet", symbol: "?", cls: counts.unconfirmed ? "text-attention" : "text-ink" },
+    { label: "Still to come", value: counts.pending, hint: "Not yet due, or due now", symbol: "○", cls: "text-ink" },
   ];
   return (
     <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {cells.map((c) => (
-        <div key={c.label} className="rounded-xl border border-line bg-canvas p-3">
-          <dt className="text-sm font-bold text-muted">{c.label}</dt>
-          <dd className="text-3xl font-bold">{c.value}</dd>
-          <dd className="text-xs text-muted">{c.hint}</dd>
+        <div key={c.label} className="rounded-md bg-oat p-4">
+          <dt className="flex items-center gap-1.5 text-base font-bold text-muted">
+            <span aria-hidden="true">{c.symbol}</span>
+            {c.label}
+          </dt>
+          <dd className={`num mt-1 text-4xl ${c.cls}`}>{c.value}</dd>
+          <dd className="text-sm text-muted">{c.hint}</dd>
         </div>
       ))}
     </dl>
@@ -124,9 +126,9 @@ export function TeamDoseRow({
 
   const idBase = dose.id.replace(/[^a-z0-9]/gi, "");
   return (
-    <li className="rounded-xl border border-line bg-surface p-4">
+    <li className="rounded-lg border border-line bg-surface p-4 sm:p-5">
       <div className="flex items-start gap-3">
-        <span className="w-14 shrink-0 text-lg font-bold">{formatTime(dose.localTime)}</span>
+        <span className="num w-16 shrink-0 text-xl">{formatTime(dose.localTime)}</span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${dose.kind === "medication" ? "bg-brand text-brand-ink" : "border border-line bg-canvas"}`}>

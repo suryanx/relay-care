@@ -3,7 +3,7 @@ import { Navigate, useParams } from "react-router";
 import type { AdherenceResponse } from "../../shared/schemas";
 import { CountsGrid, TeamDoseRow } from "../components/adherence";
 import { ProfileNav } from "../components/ProfileNav";
-import { Card, EmptyState, FormError, Shell } from "../components/ui";
+import { Card, EmptyState, FormError, Loading, Shell } from "../components/ui";
 import { formatDate, todayIn } from "../lib/format";
 import { useSession } from "../lib/session";
 import { useApi } from "../lib/useApi";
@@ -43,7 +43,7 @@ export default function Schedule() {
           </button>
         ))}
       </div>
-      {date && <h2 className="mb-1 text-xl font-bold">{formatDate(date)}</h2>}
+      {date && <h2 className="num mb-1 font-display text-2xl">{formatDate(date)}</h2>}
       {tz && <p className="mb-4 text-sm text-muted">Times shown in {tz}. Unconfirmed means nobody has answered yet — it does not mean the dose was missed.</p>}
 
       {sched.data && (
@@ -53,7 +53,7 @@ export default function Schedule() {
         </Card>
       )}
 
-      {sched.data === null && !sched.error && <p role="status">Loading schedule…</p>}
+      {sched.data === null && !sched.error && <Loading label="Loading schedule…" />}
       {sched.data?.doses.length === 0 && <EmptyState>Nothing planned for this day.</EmptyState>}
       <ol className="space-y-2">
         {sched.data?.doses.map((d) => (
